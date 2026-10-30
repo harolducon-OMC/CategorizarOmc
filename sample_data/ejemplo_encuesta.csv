@@ -1,0 +1,121 @@
+﻿ID,F1 Sexo,F2 Edad,F3 Estrato,F4 Ciudad,P1 ¿Por qué prefiere esa marca de calzado deportivo?,P2 ¿Qué banco recuerda primero?,P2A ¿Qué otro banco recuerda?
+1,Mujer,46+,3,Cali,Me la recomendó un amigo y no me ha fallado,bancolonbia,
+2,Mujer,26-35,2,Medellín,La encuentro en cualquier tienda cerca de mi casa,bancolonbia,bancolonbia
+3,Hombre,46+,3,Cali,"Dura años, la compré hace tres y sigue como nueva",Banco Agrario,Bancolombia
+4,Hombre,18-25,2,Bogotá,Tiene buena garantía y atención al cliente,Banco Agrario,Bancolombia
+5,Mujer,36-45,3,Cali,Me la recomendó un amigo y no me ha fallado,Caja Social,Davivienda y Bancolombia
+6,Mujer,46+,2,Cali,El precio me parece justo para la calidad,Davivienda y Bancolombia,Caja Social
+7,Mujer,18-25,4,Medellín,"Por el precio, hay promociones frecuentes",Ninguno,Davivienda y Bancolombia
+8,Mujer,18-25,2,Cali,Es barata y cumple,Banco Popular,BBVA
+9,Mujer,46+,2,Bogotá,Porque me dura mucho tiempo y no se daña fácil,BBVA,Banco Popular
+10,Hombre,46+,3,Cali,Es muy liviana y cómoda para caminar,Banco Popular,bancolonbia
+11,Hombre,36-45,3,Bogotá,La encuentro en cualquier tienda cerca de mi casa,banco de bogota,Bancolombia
+12,Mujer,18-25,2,Bogotá,Es barata y cumple,Bancolombia,Davivienda
+13,Mujer,46+,2,Cali,Me la recomendó un amigo y no me ha fallado,Davivienda y Bancolombia,
+14,Hombre,26-35,3,Cali,Es muy liviana y cómoda para caminar,Davivienda,Ninguno
+15,Mujer,26-35,2,Medellín,La encuentro en cualquier tienda cerca de mi casa,Banco de Occidente,Bancolombia
+16,Hombre,26-35,3,Cali,Es barata y cumple,Bancolombia,Banco de Bogotá
+17,Hombre,46+,3,Bogotá,"Por el precio, hay promociones frecuentes",Bancamía,Banco Agrario
+18,Mujer,18-25,2,Bogotá,Me la recomendó un amigo y no me ha fallado,Banco Agrario,Davivienda y Bancolombia
+19,Hombre,36-45,3,Cali,Me gusta el color y el estilo,bancolonbia,
+20,Hombre,46+,2,Cali,"Me gusta el diseño, se ve moderna",Banco de Bogotá,Davivienda y Bancolombia
+21,Hombre,26-35,2,Cali,Me la recomendó un amigo y no me ha fallado,bbva,Ninguno
+22,Mujer,18-25,3,Bogotá,Es barata y cumple,Davivienda,Davivienda
+23,Mujer,26-35,4,Cali,Es muy liviana y cómoda para caminar,Banco de Bogotá,Bancamía
+24,Mujer,36-45,4,Bogotá,El precio me parece justo para la calidad,bancolonbia,Davivienda y Bancolombia
+25,Mujer,18-25,3,Bogotá,Me la recomendó un amigo y no me ha fallado,No sé,Bancolombia
+26,Hombre,36-45,3,Medellín,Tiene buena garantía y atención al cliente,Bancolombia,Davivienda
+27,Hombre,36-45,3,Cali,"Me gusta el diseño, se ve moderna",Davivienda,No sé
+28,Hombre,46+,3,Cali,"Me gusta el diseño, se ve moderna",Banco Agrario,Davivienda
+29,Hombre,46+,3,Cali,La encuentro en cualquier tienda cerca de mi casa,Bancolombia,Bancolombia
+30,Hombre,46+,2,Cali,La encuentro en cualquier tienda cerca de mi casa,banco de bogota,Banco de Bogotá
+31,Hombre,18-25,3,Cali,No sé,No sé,Davivienda
+32,Hombre,36-45,3,Bogotá,ns/nr,Banco de Occidente,bancolonbia
+33,Mujer,18-25,3,Cali,Porque me dura mucho tiempo y no se daña fácil,Banco Agrario,Ninguno
+34,Mujer,18-25,4,Bogotá,El precio me parece justo para la calidad,Davivienda,BBVA
+35,Mujer,46+,4,Medellín,Es muy liviana y cómoda para caminar,Banco de Occidente,Banco de Occidente
+36,Mujer,46+,4,Bogotá,Porque me dura mucho tiempo y no se daña fácil,Banco de Bogotá,bancolonbia
+37,Mujer,18-25,2,Cali,Es barata y cumple,Davivienda y Bancolombia,
+38,Mujer,18-25,3,Medellín,"Me gusta el diseño, se ve moderna",bbva,Banco Popular
+39,Hombre,36-45,4,Medellín,ns/nr,Banco de Occidente,Davivienda y Bancolombia
+40,Mujer,46+,4,Medellín,Me la recomendó un amigo y no me ha fallado,bbva,Bancamía
+41,Hombre,26-35,3,Bogotá,"Por el precio, hay promociones frecuentes",BBVA,Banco de Bogotá
+42,Hombre,46+,3,Bogotá,El precio me parece justo para la calidad,Banco de Bogotá,banco de bogota
+43,Hombre,46+,3,Medellín,Me la recomendó un amigo y no me ha fallado,Bancamía,Bancamía
+44,Mujer,46+,4,Medellín,Me gusta el color y el estilo,banco de bogota,bancolonbia
+45,Hombre,36-45,4,Bogotá,Resiste bien el agua y el uso diario,Banco Agrario,No sé
+46,Mujer,18-25,4,Bogotá,Es muy liviana y cómoda para caminar,Davivienda y Bancolombia,Banco Popular
+47,Hombre,36-45,2,Bogotá,"Es muy cómoda, uno la usa todo el día",bbva,BBVA
+48,Mujer,18-25,4,Cali,No sé,Davivienda,Banco Popular
+49,Hombre,46+,3,Bogotá,Porque me dura mucho tiempo y no se daña fácil,Ninguno,
+50,Hombre,26-35,2,Medellín,No sé,Caja Social,
+51,Hombre,46+,4,Bogotá,El precio me parece justo para la calidad,Banco Popular,Ninguno
+52,Hombre,46+,3,Bogotá,Porque me dura mucho tiempo y no se daña fácil,Banco Popular,
+53,Mujer,46+,3,Cali,Me la recomendó un amigo y no me ha fallado,Davivienda,BBVA
+54,Hombre,26-35,3,Bogotá,La encuentro en cualquier tienda cerca de mi casa,Caja Social,bbva
+55,Mujer,18-25,3,Cali,El precio me parece justo para la calidad,Bancolombia,Banco de Occidente
+56,Mujer,46+,3,Medellín,Porque me dura mucho tiempo y no se daña fácil,BBVA,bancolonbia
+57,Mujer,18-25,2,Cali,"Por el precio, hay promociones frecuentes",bbva,Banco de Bogotá
+58,Mujer,26-35,4,Cali,Me gusta el color y el estilo,Banco de Occidente,
+59,Hombre,26-35,3,Cali,La encuentro en cualquier tienda cerca de mi casa,Bancamía,
+60,Hombre,36-45,3,Cali,Es muy liviana y cómoda para caminar,Bancamía,Banco Popular
+61,Mujer,26-35,4,Cali,Resiste bien el agua y el uso diario,Banco Agrario,
+62,Hombre,46+,4,Bogotá,Porque me dura mucho tiempo y no se daña fácil,Banco Agrario,Ninguno
+63,Hombre,18-25,4,Medellín,Es barata y cumple,Davivienda y Bancolombia,bancolonbia
+64,Hombre,18-25,4,Medellín,Es de buena calidad aunque algo cara,Banco de Occidente,Ninguno
+65,Mujer,26-35,3,Medellín,"Me gusta el diseño, se ve moderna",banco de bogota,Bancamía
+66,Mujer,36-45,2,Bogotá,Es de buena calidad aunque algo cara,Banco Agrario,Bancolombia
+67,Mujer,26-35,4,Bogotá,"Es muy cómoda, uno la usa todo el día",BBVA,Banco de Bogotá
+68,Hombre,18-25,4,Medellín,"Por el precio, hay promociones frecuentes",No sé,No sé
+69,Hombre,46+,2,Medellín,Es barata y cumple,Bancamía,
+70,Mujer,26-35,4,Cali,Es de buena calidad aunque algo cara,Bancolombia,Ninguno
+71,Mujer,26-35,4,Bogotá,Me la recomendó un amigo y no me ha fallado,Caja Social,Banco Popular
+72,Hombre,26-35,4,Cali,No sé,Banco de Occidente,banco de bogota
+73,Mujer,36-45,2,Bogotá,Me la recomendó un amigo y no me ha fallado,Banco de Occidente,BBVA
+74,Hombre,26-35,2,Cali,El precio me parece justo para la calidad,Banco de Bogotá,Ninguno
+75,Hombre,46+,3,Cali,"Me gusta el diseño, se ve moderna",BBVA,Ninguno
+76,Hombre,18-25,2,Cali,No sé,Banco de Occidente,No sé
+77,Hombre,36-45,4,Cali,Me la recomendó un amigo y no me ha fallado,Ninguno,bancolonbia
+78,Mujer,18-25,2,Bogotá,ns/nr,bancolonbia,Banco Popular
+79,Hombre,18-25,2,Bogotá,"Dura años, la compré hace tres y sigue como nueva",Banco de Bogotá,BBVA
+80,Hombre,26-35,4,Medellín,El precio me parece justo para la calidad,Ninguno,BBVA
+81,Mujer,46+,3,Medellín,No sé,Banco Popular,Banco Popular
+82,Mujer,18-25,4,Cali,"Es muy cómoda, uno la usa todo el día",Bancamía,Banco Popular
+83,Hombre,46+,3,Medellín,No sé,Banco Popular,Banco Popular
+84,Hombre,18-25,4,Bogotá,"Por el precio, hay promociones frecuentes",Banco de Occidente,bancolonbia
+85,Mujer,26-35,4,Cali,"Por el precio, hay promociones frecuentes",Ninguno,Caja Social
+86,Mujer,18-25,4,Cali,"Dura años, la compré hace tres y sigue como nueva",Bancamía,Ninguno
+87,Hombre,36-45,4,Cali,No sé,Ninguno,Bancamía
+88,Hombre,46+,2,Cali,"Dura años, la compré hace tres y sigue como nueva",Davivienda,bbva
+89,Mujer,46+,2,Bogotá,No sé,bbva,Davivienda
+90,Hombre,36-45,4,Medellín,"Por el precio, hay promociones frecuentes",BBVA,Ninguno
+91,Hombre,18-25,3,Cali,ns/nr,bbva,Banco Popular
+92,Hombre,46+,4,Bogotá,Es barata y cumple,Banco Agrario,BBVA
+93,Hombre,36-45,3,Medellín,"Es muy cómoda, uno la usa todo el día",Ninguno,Banco Popular
+94,Mujer,18-25,2,Medellín,Resiste bien el agua y el uso diario,Banco de Bogotá,bbva
+95,Mujer,18-25,4,Medellín,El precio me parece justo para la calidad,Caja Social,Davivienda
+96,Mujer,26-35,3,Medellín,"Dura años, la compré hace tres y sigue como nueva",Bancamía,
+97,Hombre,46+,3,Medellín,La encuentro en cualquier tienda cerca de mi casa,Caja Social,Ninguno
+98,Mujer,36-45,4,Medellín,ns/nr,bbva,Caja Social
+99,Mujer,36-45,2,Bogotá,Tiene buena garantía y atención al cliente,Banco Agrario,Davivienda
+100,Hombre,46+,4,Medellín,"Es muy cómoda, uno la usa todo el día",Banco de Occidente,bbva
+101,Mujer,18-25,4,Cali,"Por el precio, hay promociones frecuentes",Davivienda,Davivienda y Bancolombia
+102,Mujer,46+,3,Bogotá,"Es muy cómoda, uno la usa todo el día",Caja Social,BBVA
+103,Mujer,26-35,2,Cali,Es barata y cumple,Bancolombia,Bancamía
+104,Mujer,18-25,2,Bogotá,No sé,Caja Social,Banco de Bogotá
+105,Hombre,36-45,3,Bogotá,Es de buena calidad aunque algo cara,Davivienda y Bancolombia,Caja Social
+106,Mujer,36-45,4,Cali,"Me gusta el diseño, se ve moderna",Banco de Bogotá,Banco de Bogotá
+107,Hombre,46+,2,Cali,La encuentro en cualquier tienda cerca de mi casa,Ninguno,
+108,Mujer,36-45,3,Cali,Me la recomendó un amigo y no me ha fallado,bbva,Caja Social
+109,Hombre,26-35,2,Cali,Me la recomendó un amigo y no me ha fallado,Banco de Occidente,Davivienda
+110,Hombre,18-25,3,Medellín,Es de buena calidad aunque algo cara,Bancolombia,Davivienda
+111,Hombre,26-35,4,Medellín,El precio me parece justo para la calidad,Ninguno,bancolonbia
+112,Hombre,26-35,4,Medellín,ns/nr,Davivienda y Bancolombia,No sé
+113,Hombre,36-45,3,Medellín,"Me gusta el diseño, se ve moderna",Bancamía,bancolonbia
+114,Hombre,46+,4,Bogotá,Me gusta el color y el estilo,Banco Popular,Caja Social
+115,Mujer,26-35,3,Bogotá,"Por el precio, hay promociones frecuentes",Banco de Bogotá,
+116,Hombre,46+,4,Medellín,Es barata y cumple,Davivienda y Bancolombia,bbva
+117,Hombre,18-25,3,Cali,ns/nr,Bancamía,Banco de Occidente
+118,Mujer,18-25,2,Medellín,Me la recomendó un amigo y no me ha fallado,Banco de Occidente,bancolonbia
+119,Mujer,46+,4,Cali,"Por el precio, hay promociones frecuentes",Banco de Bogotá,Banco de Bogotá
+120,Hombre,36-45,4,Cali,"Por el precio, hay promociones frecuentes",banco de bogota,BBVA
