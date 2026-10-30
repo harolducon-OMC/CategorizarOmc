@@ -1,13 +1,47 @@
 .awareness-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 16px;
+  gap: 22px;
   align-items: start;
+}
+
+.awareness-result {
+  padding: 20px;
 }
 
 .awareness-config-card {
   display: grid;
   gap: 12px;
+}
+
+.awareness-config-grid {
+  display: grid;
+  grid-template-columns: minmax(240px, .82fr) minmax(0, 1.8fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.awareness-config-context,
+.awareness-config-analysis {
+  display: grid;
+  align-content: start;
+  gap: 13px;
+  min-width: 0;
+}
+
+.awareness-context-section {
+  padding: 13px;
+  border: 1px solid #edf0f4;
+  border-radius: 9px;
+  background: #fbfcfe;
+}
+
+.awareness-config-context .awareness-source-picker {
+  margin: 0;
+}
+
+.awareness-config-context .awareness-source-list {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .awareness-config-heading,
@@ -34,16 +68,16 @@
 
 .awareness-profiles-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
 }
 
 .awareness-profile {
   display: grid;
   align-content: start;
-  gap: 12px;
+  gap: 9px;
   min-width: 0;
-  padding: 15px;
+  padding: 12px 14px;
   border: 1px solid #e6eaf1;
   border-radius: 10px;
   background: linear-gradient(180deg, #fbfcfe, #fff);
@@ -62,10 +96,22 @@
   font-size: 14px;
 }
 
+.awareness-profile-fields {
+  display: grid;
+  grid-template-columns: minmax(125px, .8fr) repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  align-items: start;
+}
+
 .awareness-profile label,
 .awareness-options-grid label,
 .awareness-demographics-grid label {
   min-width: 0;
+  margin: 0;
+}
+
+.awareness-profile label {
+  gap: 5px;
 }
 
 .awareness-code-input {
@@ -100,6 +146,10 @@
   border-top: 1px solid #edf0f4;
 }
 
+.awareness-validation .info-callout {
+  margin: 0;
+}
+
 .awareness-validation-heading {
   margin-bottom: 10px;
 }
@@ -124,15 +174,38 @@
 
 .awareness-options-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   margin-top: 2px;
 }
 
 .awareness-demographics-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.awareness-demographics-grid label {
+  font-size: 9px;
+}
+
+.awareness-demographics-grid select {
+  min-width: 0;
+  padding: 7px 8px;
+  font-size: 10px;
+}
+
+.awareness-demographics-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 14px 0 9px;
+}
+
+.awareness-demographics-heading span {
+  color: #9aa3b1;
+  font-size: 9px;
 }
 
 .awareness-hint {
@@ -151,13 +224,125 @@
   font: 700 14px Manrope, sans-serif;
 }
 
-@media (max-width: 900px) {
-  .awareness-profiles-grid {
+.awa-preview-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 76px;
+  padding: 14px;
+  border: 1px dashed #dfe5ee;
+  border-radius: 9px;
+  background: #fbfcfe;
+  color: #8792a4;
+  font-size: 10px;
+}
+
+.awa-preview-placeholder svg {
+  flex: none;
+  color: #6b83d0;
+}
+
+.awa-preview-panel {
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid #edf0f4;
+}
+
+.awa-preview-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 13px;
+}
+
+.awa-preview-heading h3 {
+  margin: 4px 0;
+  color: #2d3a52;
+  font: 700 14px Manrope, sans-serif;
+}
+
+.awa-preview-heading p {
+  margin: 0;
+  color: #8a95a6;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.awa-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 13px;
+}
+
+.awa-preview-analysis {
+  min-width: 0;
+  padding: 13px;
+  border: 1px solid #e8ebf1;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.awa-preview-analysis-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 9px;
+}
+
+.awa-preview-analysis-title h4 {
+  margin: 0;
+  color: #344157;
+  font: 700 12px Manrope, sans-serif;
+}
+
+.awa-preview-analysis-title span {
+  color: #9aa3b1;
+  font-size: 9px;
+}
+
+.awa-preview-chart {
+  margin: 7px 0 10px;
+}
+
+.awa-preview-table {
+  border-top: 1px solid #edf0f4;
+  padding-top: 7px;
+}
+
+.awa-preview-table table {
+  min-width: 440px;
+}
+
+.awa-preview-table thead th,
+.awa-preview-table tbody td {
+  padding: 7px 8px;
+  font-size: 9px;
+}
+
+.awa-preview-table tbody td:first-child {
+  min-width: 120px;
+  white-space: normal;
+}
+
+@media (max-width: 950px) {
+  .awareness-config-grid {
     grid-template-columns: 1fr;
   }
 
-  .awareness-demographics-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+  .awareness-config-context {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 700px) {
+  .awareness-config-context {
+    grid-template-columns: 1fr;
+  }
+
+  .awa-preview-grid {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -167,8 +352,11 @@
     flex-direction: column;
   }
 
-  .awareness-options-grid,
-  .awareness-demographics-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .awareness-profile-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .awa-preview-heading {
+    flex-direction: column;
   }
 }

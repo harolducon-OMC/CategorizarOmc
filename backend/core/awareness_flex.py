@@ -114,6 +114,44 @@ def detect_columns(columns: List[str], config: Dict[str, Any]) -> List[Dict[str,
     return rows
 
 
+def preview_results(frame: pd.DataFrame, config: Dict[str, Any]) -> Dict[str, Any]:
+    """Return the same general Awareness tables used by the downloadable report."""
+    if config["max_rows"]:
+        frame = frame.head(config["max_rows"]).copy()
+
+    active_analyses = [cfg for cfg in config["analyses"] if _active(cfg)]
+    if not active_analyses:
+        raise ValueError("Debe configurar al menos un análisis válido (TOM, Espontáneo o Ayudado).")
+
+    demo_cols = {
+        key: awareness.find_col(frame, config["demographics"].get(key, ""))
+        for key in DEMO_KEYS
+    }
+    analyses = []
+    for cfg in active_analyses:
+        _, indicators, _ = awareness.build_analysis(
+            frame, demo_cols, cfg, config["entities"], config["aliases"],
+            config["normalizations"], config["expected_raw_cols"],
+        )
+        table = awareness.category_table(indicators, frame, None, None, config["entities"])
+        rows = []
+        for record in table.to_dict(orient="records"):
+            rows.append({
+                "Entidad": str(record["Entidad"]),
+                "TOM": int(record["TOM"]),
+                "TOM %": float(record["TOM %"]),
+                "Espontaneo": int(record["Espontaneo"]),
+                "Espontaneo %": float(record["Espontaneo %"]),
+                "Ayudado": int(record["Ayudado"]),
+                "Ayudado %": float(record["Ayudado %"]),
+                "AWA": int(record["AWA"]),
+                "AWA %": float(record["AWA %"]),
+            })
+        analyses.append({"name": cfg["name"], "rows": rows})
+
+    return {"base": int(len(frame)), "analyses": analyses}
+
+
 def generate_report(frame: pd.DataFrame, config: Dict[str, Any]) -> bytes:
     """Excel final idéntico al de la app Streamlit original."""
     if config["max_rows"]:

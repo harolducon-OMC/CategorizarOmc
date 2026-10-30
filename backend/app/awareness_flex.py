@@ -49,6 +49,17 @@ def validate_columns(request: ValidateRequest):
     return {"rows": awareness_flex.detect_columns(request.columns, config)}
 
 
+@router.post("/preview")
+async def preview_awareness(file: UploadFile = File(...), config: str = Form(...), sheet: str = Form("")):
+    cfg = _config_or_400(config)
+    raw = await file.read()
+    frame = _read_dataframe(raw, file.filename or "datos.csv", sheet or None)
+    try:
+        return awareness_flex.preview_results(frame, cfg)
+    except Exception as exc:
+        raise HTTPException(400, f"No se pudo calcular la vista previa: {exc}") from exc
+
+
 @router.post("/report")
 async def build_report(file: UploadFile = File(...), config: str = Form(...), sheet: str = Form("")):
     cfg = _config_or_400(config)

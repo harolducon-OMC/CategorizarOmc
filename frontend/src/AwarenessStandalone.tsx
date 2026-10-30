@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDownToLine, Check, FileSpreadsheet, LoaderCircle, UploadCloud } from 'lucide-react'
+import { ArrowDownToLine, BarChart3, Check, FileSpreadsheet, LoaderCircle, UploadCloud } from 'lucide-react'
+import {
+  Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis,
+} from 'recharts'
 
 /**
  * Awareness INDEPENDIENTE: carga un CSV/XLSX propio y descarga el Excel de resultados.
@@ -14,6 +17,14 @@ type Preset = {
 }
 type Inspect = { filename: string; sheets: string[]; columns: string[]; row_count: number }
 type ValidationRow = { tipo: string; campo: string; columnas: string }
+type PreviewRow = {
+  Entidad: string
+  'TOM %': number
+  'Espontaneo %': number
+  'Ayudado %': number
+  'AWA %': number
+}
+type Preview = { base: number; analyses: { name: string; rows: PreviewRow[] }[] }
 
 const DEMO_LABELS: Record<string, string> = {
   sexo: 'Sexo', edad: 'Edad', departamento: 'Departamento / Ciudad', estrato: 'Estrato', ingreso: 'Ingreso / Rangos',
@@ -49,6 +60,7 @@ export default function AwarenessStandalone({ onNotice }: { onNotice: (n: { text
   const [maxRows, setMaxRows] = useState(0)
   const [expectedCols, setExpectedCols] = useState(0)
   const [validation, setValidation] = useState<ValidationRow[]>([])
+  const [preview, setPreview] = useState<Preview | null>(null)
   const [reading, setReading] = useState(false)
   const [busy, setBusy] = useState(false)
   const [done, setDone] = useState(false)
@@ -100,6 +112,11 @@ export default function AwarenessStandalone({ onNotice }: { onNotice: (n: { text
   }, [entitiesText, aliasesText, normText, demographics, analyses, maxRows, expectedCols])
 
   useEffect(() => {
+    setPreview(null)
+    setDone(false)
+  }, [file, sheet, parsed])
+
+  useEffect(() => {
     if (!info || !parsed.config) { setValidation([]); return }
     const timer = window.setTimeout(() => {
       callJson<{ rows: ValidationRow[] }>('/api/awareness-flex/validate', {
@@ -113,11 +130,16 @@ export default function AwarenessStandalone({ onNotice }: { onNotice: (n: { text
 
   async function generate() {
     if (!file || !parsed.config) return
-    setBusy(true); setDone(false)
+    setBusy(true); setDone(false); setPreview(null)
     try {
-      const form = new FormData()
-      form.append('file', file); form.append('sheet', sheet); form.append('config', JSON.stringify(parsed.config))
-      const response = await call<Response>('/api/awareness-flex/report', { method: 'POST', body: form })
+      const previewForm = new FormData()
+      previewForm.append('file', file); previewForm.append('sheet', sheet); previewForm.append('config', JSON.stringify(parsed.config))
+      const previewData = await callJson<Preview>('/api/awareness-flex/preview', { method: 'POST', body: previewForm })
+      setPreview(previewData)
+
+      const reportForm = new FormData()
+      reportForm.append('file', file); reportForm.append('sheet', sheet); reportForm.append('config', JSON.stringify(parsed.config))
+      const response = await call<Response>('/api/awareness-flex/report', { method: 'POST', body: reportForm })
       const blob = await response.blob()
       const url = URL.createObjectURL(blob)
       const anchor = document.createElement('a')
@@ -217,10 +239,48 @@ export default function AwarenessStandalone({ onNotice }: { onNotice: (n: { text
           </div>
         ) : <div className="info-callout"><Check size={16} /><span>Carga un archivo para ver qué columnas detecta cada prefijo.</span></div>}
         <button className="button-primary full-width mt-12" onClick={generate} disabled={busy || !file || !parsed.config || !hasAnalysis}>
-          {busy ? <><LoaderCircle className="spin" size={16} /> Generando…</> : <><ArrowDownToLine size={16} /> Generar reporte Excel</>}
+          {busy ? <><LoaderCircle className="spin" size={16} /> Calculando…</> : <><ArrowDownToLine size={16} /> Calcular y descargar Excel</>}
         </button>
         {file && !hasAnalysis && <small className="field-help">Configura al menos un análisis (TOM, Espontáneo o Ayudado) para habilitar el reporte.</small>}
         {done && <div className="info-callout"><Check size={16} /><span>Reporte generado. Revisa tu carpeta de descargas.</span></div>}
+        {preview ? (
+          <section className="awa-preview-panel">
+            <div className="awa-preview-heading">
+              <div><div className="card-label">RESULTADO</div><h3>Vista previa de Awareness</h3><p>Porcentaje de la base que recuerda cada entidad en cada nivel.</p></div>
+              <span className="base-chip">Base: <b>{preview.base.toLocaleString()}</b> respuestas</span>
+            </div>
+            <div className="awa-preview-grid">
+              {preview.analyses.map((analysis) => (
+                <article className="awa-preview-analysis" key={analysis.name}>
+                  <div className="awa-preview-analysis-title"><h4>{analysis.name}</h4><span>{analysis.rows.length} marcas</span></div>
+                  {analysis.rows.length ? <>
+                    <div className="chart-wrap awa-preview-chart">
+                      <ResponsiveContainer width="100%" height={Math.max(230, analysis.rows.length * 38)}>
+                        <BarChart data={analysis.rows} layout="vertical" margin={{ top: 6, right: 18, left: 8, bottom: 4 }}>
+                          <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e9edf3" />
+                          <XAxis type="number" domain={[0, 1]} tickFormatter={(value) => `${Math.round(value * 100)}%`} axisLine={false} tickLine={false} tick={{ fill: '#8b94a7', fontSize: 10 }} />
+                          <YAxis type="category" dataKey="Entidad" width={126} axisLine={false} tickLine={false} tick={{ fill: '#4b566b', fontSize: 10 }} />
+                          <Tooltip formatter={(value: any, name: any) => [`${(Number(value) * 100).toFixed(1)}%`, name]} contentStyle={{ border: '1px solid #e7eaf0', borderRadius: 9, fontSize: 11 }} />
+                          <Legend wrapperStyle={{ fontSize: 10, paddingTop: 8 }} />
+                          <Bar dataKey="TOM %" name="TOM" stackId="awareness" fill="#315bdb" />
+                          <Bar dataKey="Espontaneo %" name="Espontáneo" stackId="awareness" fill="#18a994" />
+                          <Bar dataKey="Ayudado %" name="Ayudado" stackId="awareness" fill="#ef9b46" />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <div className="table-scroll awa-preview-table">
+                      <table><thead><tr><th>Marca</th><th>TOM</th><th>Espontáneo</th><th>Ayudado</th><th>AWA</th></tr></thead>
+                        <tbody>{analysis.rows.map((row) => <tr key={row.Entidad}>
+                          <td>{row.Entidad}</td><td>{(row['TOM %'] * 100).toFixed(1)}%</td><td>{(row['Espontaneo %'] * 100).toFixed(1)}%</td><td>{(row['Ayudado %'] * 100).toFixed(1)}%</td><td><b>{(row['AWA %'] * 100).toFixed(1)}%</b></td>
+                        </tr>)}</tbody>
+                      </table>
+                    </div>
+                  </> : <div className="empty-inline">No hay marcas para graficar en este análisis.</div>}
+                </article>
+              ))}
+            </div>
+          </section>
+        ) : <div className="awa-preview-placeholder"><BarChart3 size={17} /><span>Al calcular el Awareness, aquí aparecerán los gráficos de ambos análisis.</span></div>}
       </section>
     </div>
   )
