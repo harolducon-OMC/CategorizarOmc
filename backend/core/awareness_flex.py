@@ -107,8 +107,8 @@ def detect_columns(columns: List[str], config: Dict[str, Any]) -> List[Dict[str,
         if not _active(cfg):
             continue
         label = f"Análisis {index} · {cfg['name']}"
-        tom = awareness.find_col(frame, cfg["tom"])
-        rows.append({"tipo": label, "campo": "TOM", "columnas": str(tom) if tom else ""})
+        tom = awareness.find_cols(frame, cfg["tom"])
+        rows.append({"tipo": label, "campo": "TOM", "columnas": ", ".join(map(str, tom))})
         rows.append({"tipo": label, "campo": "Espontáneo", "columnas": ", ".join(map(str, awareness.find_cols(frame, cfg["esp"])))})
         rows.append({"tipo": label, "campo": "Ayudado", "columnas": ", ".join(map(str, awareness.find_cols(frame, cfg["ayu"])))})
     return rows

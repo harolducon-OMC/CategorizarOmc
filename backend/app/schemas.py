@@ -42,10 +42,19 @@ class LabelsBatchEdit(BaseModel):
     changes: list[LabelEdit] = Field(min_length=1, max_length=500)
 
 
+class AwarenessAnalysisRequest(BaseModel):
+    name: str = Field(default="Awareness", max_length=100)
+    tom_column: str = ""
+    spontaneous_columns: list[str] = Field(default_factory=list)
+    aided_columns: list[str] = Field(default_factory=list)
+
+
 class AwarenessRequest(BaseModel):
     classification_id: str
     classification_ids: list[str] = Field(default_factory=list)
     entities: list[str] = Field(default_factory=list)
+    analyses: list[AwarenessAnalysisRequest] = Field(default_factory=list)
+    # Campos heredados para clientes anteriores a los dos perfiles de análisis.
     tom_column: str = ""
     spontaneous_columns: list[str] = Field(default_factory=list)
     aided_columns: list[str] = Field(default_factory=list)

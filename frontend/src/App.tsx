@@ -23,6 +23,12 @@ type Classification = {
 }
 type Frequency = { Categoría: string; Menciones: number; '%': number }
 type ReviewRow = { row_index: number; response: string | null; labels: string[] }
+type AwarenessProfile = {
+  name: string
+  tom_column: string
+  spontaneous_columns: string[]
+  aided_columns: string[]
+}
 
 const COLORS = ['#315bdb', '#18a994', '#ef9b46', '#8158cb', '#db6482', '#5e7f90', '#a9b548']
 const PROVIDERS: Record<string, { label: string; model: string }> = {
@@ -487,9 +493,10 @@ function AwarenessHub({ study, onNotice }: any) {
 function AwarenessPage({ study, onNotice }: any) {
   const brandClasses: Classification[] = (study?.classifications || []).filter((item: Classification) => item.kind === 'brands')
   const [classIds, setClassIds] = useState<string[]>([])
-  const [tom, setTom] = useState('')
-  const [spontaneous, setSpontaneous] = useState<string[]>([])
-  const [aided, setAided] = useState<string[]>([])
+  const [analyses, setAnalyses] = useState<AwarenessProfile[]>([
+    { name: 'AWA Marca', tom_column: '', spontaneous_columns: [], aided_columns: [] },
+    { name: 'AWA Publicitario', tom_column: '', spontaneous_columns: [], aided_columns: [] },
+  ])
   const [demographics, setDemographics] = useState<Record<string, string>>({ sexo: '', edad: '', departamento: '', estrato: '', ingreso: '' })
   const [segment, setSegment] = useState('')
   const [segmentValue, setSegmentValue] = useState('')
@@ -499,6 +506,10 @@ function AwarenessPage({ study, onNotice }: any) {
   const [authChecked, setAuthChecked] = useState(false)
   const [userEmail, setUserEmail] = useState('')
   const brandClass = brandClasses.find((item) => item.id === classIds[0]) || brandClasses[0]
+  const analysesReady = analyses.every((item) => [item.tom_column, ...item.spontaneous_columns, ...item.aided_columns].some(Boolean))
+  function updateAnalysis(index: number, changes: Partial<AwarenessProfile>) {
+    setAnalyses((current) => current.map((item, currentIndex) => currentIndex === index ? { ...item, ...changes } : item))
+  }
   useEffect(() => {
     const validIds = classIds.filter((id) => brandClasses.some((item) => item.id === id))
     if (!validIds.length && brandClasses.length) setClassIds(brandClasses.map((item) => item.id))
@@ -512,12 +523,12 @@ function AwarenessPage({ study, onNotice }: any) {
     }).catch((err) => onNotice({ text: err.message, error: true }))
   }, [study?.id, segment])
   async function calculate() {
-    if (!study || !brandClass || !classIds.length) return
+    if (!study || !brandClass || !classIds.length || !analysesReady) return
     setBusy(true)
     try {
       setResult(await api<any>(`/api/studies/${study.id}/awareness`, {
         method: 'POST', body: JSON.stringify({
-          classification_id: classIds[0], classification_ids: classIds, tom_column: tom, spontaneous_columns: spontaneous, aided_columns: aided,
+          classification_id: classIds[0], classification_ids: classIds, analyses,
           demographics, segment_column: segment, segment_value: segmentValue,
         }),
       }))
@@ -526,12 +537,36 @@ function AwarenessPage({ study, onNotice }: any) {
   }
   if (!study) return <EmptyState title="Carga o selecciona un estudio" text="Awareness utiliza las columnas de una encuesta y una lista de marcas." action="Ir a Inicio" />
   if (!brandClasses.length) return <EmptyState title="Primero detecta marcas" text="Clasifica una pregunta de tipo Marcas para reutilizar sus marcas y alias en Awareness." action="Ir a Categorización" />
-  const multiSelect = (label: string, value: string[], onChange: (v: string[]) => void) => <label>{label}<select multiple value={value} onChange={(e) => onChange(Array.from(e.target.selectedOptions).map((o) => o.value))}>{(study.columns || []).map((c: string) => <option key={c}>{c}</option>)}</select><small className="field-help">Mantén Ctrl (Windows) o Cmd (Mac) para elegir varias.</small></label>
-  const chartRows = result?.rows?.map((r: any) => ({ name: r.Entidad, tom: r['TOM %'], espontaneo: r['Espontaneo %'], ayudado: r['Ayudado %'] })) || []
+  const multiSelect = (index: number, label: string, key: 'spontaneous_columns' | 'aided_columns') => <label>{label}<select multiple value={analyses[index][key]} onChange={(e) => updateAnalysis(index, { [key]: Array.from(e.target.selectedOptions).map((o) => o.value) })}>{(study.columns || []).map((c: string) => <option key={c}>{c}</option>)}</select><small className="field-help">Puedes seleccionar una pregunta base; sus columnas con sufijo como _1 y _2 se agrupan automáticamente. Mantén Ctrl/Cmd para elegir varias preguntas.</small></label>
+  const resultAnalyses = result?.analyses || (result ? [{ name: 'Awareness', rows: result.rows || [] }] : [])
   return <>
     <PageHeading eyebrow="RECORDACIÓN DE MARCA" title="Awareness" text="Configura Top of Mind, recordación espontánea y ayudada a partir de las marcas detectadas." />
-    <div className="awareness-layout"><section className="card form-card"><div className="card-label">CONFIGURACIÓN</div><h3>Diseña tu análisis</h3><div className="awareness-source-picker"><div className="awareness-source-heading"><b>Preguntas de marcas para consolidar</b><button className="button-text" onClick={() => setClassIds(classIds.length === brandClasses.length ? [] : brandClasses.map((item) => item.id))}>{classIds.length === brandClasses.length ? 'Desmarcar todas' : 'Seleccionar todas'}</button></div><div className="awareness-source-list">{brandClasses.map((item) => <label key={item.id}><input type="checkbox" checked={classIds.includes(item.id)} onChange={(event) => setClassIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} /><span>{item.question}</span></label>)}</div><small className="field-help">Se unen marcas y alias detectados por cada columna seleccionada.</small></div><div className="form-grid-two"><label>TOM · columna<select value={tom} onChange={(e) => setTom(e.target.value)}><option value="">Sin TOM</option>{study.columns.map((c: string) => <option key={c}>{c}</option>)}</select></label><label>Segmento opcional<select value={segment} onChange={(e) => { setSegment(e.target.value); setSegmentValue('') }}><option value="">Total</option>{study.columns.map((c: string) => <option key={c}>{c}</option>)}</select></label></div>{segment && <label>Valor del segmento<select value={segmentValue} onChange={(e) => setSegmentValue(e.target.value)}>{segmentValues.map((v) => <option key={v} value={v}>{v}</option>)}</select></label>}{multiSelect('Espontáneo · columnas (opcional)', spontaneous, setSpontaneous)}{multiSelect('Ayudado · columnas (opcional)', aided, setAided)}<div className="card-label mt-12">VARIABLES DEMOGRÁFICAS</div><div className="form-grid-two">{Object.entries(demographics).map(([key, value]) => <label key={key}>{key[0].toUpperCase() + key.slice(1)}<select value={value} onChange={(e) => setDemographics({ ...demographics, [key]: e.target.value })}><option value="">No usar</option>{study.columns.map((c: string) => <option key={c}>{c}</option>)}</select></label>)}</div><button className="button-primary full-width" onClick={calculate} disabled={busy || !classIds.length || (!tom && !spontaneous.length && !aided.length)}>{busy ? <><LoaderCircle className="spin" size={16} /> Calculando…</> : <><BarChart3 size={16} /> Calcular awareness</>}</button></section>
-      <section className="card awareness-result"><div className="card-heading"><div><div className="card-label">RESULTADO</div><h3>Recordación por marca</h3></div>{result && <span className="base-chip">Base: <b>{result.base}</b></span>}</div>{result ? <><div className="chart-wrap"><ResponsiveContainer width="100%" height={Math.max(300, chartRows.length * 44)}><BarChart data={chartRows} layout="vertical" margin={{ left: 18, right: 26 }}><CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e9edf3" /><XAxis type="number" tickFormatter={(v) => `${Math.round(v * 100)}%`} axisLine={false} tickLine={false} /><YAxis type="category" dataKey="name" width={130} axisLine={false} tickLine={false} /><Tooltip formatter={(v: any) => `${(Number(v) * 100).toFixed(1)}%`} /><Bar dataKey="tom" name="TOM" stackId="a" fill="#315bdb" /><Bar dataKey="espontaneo" name="Espontáneo" stackId="a" fill="#18a994" /><Bar dataKey="ayudado" name="Ayudado" stackId="a" fill="#ef9b46" /></BarChart></ResponsiveContainer></div><div className="table-scroll"><table><thead><tr><th>Marca</th><th>TOM</th><th>Espontáneo</th><th>Ayudado</th><th>AWA</th></tr></thead><tbody>{result.rows.map((r: any) => <tr key={r.Entidad}><td>{r.Entidad}</td><td>{(r['TOM %'] * 100).toFixed(1)}%</td><td>{(r['Espontaneo %'] * 100).toFixed(1)}%</td><td>{(r['Ayudado %'] * 100).toFixed(1)}%</td><td><b>{(r['AWA %'] * 100).toFixed(1)}%</b></td></tr>)}</tbody></table></div></> : <div className="empty-panel large-empty"><div className="empty-icon"><UsersRound size={20} /></div><b>Configura las columnas para empezar</b><span>La clasificación de marcas alimenta automáticamente las entidades y sus alias.</span></div>}</section></div>
+    <div className="awareness-layout">
+      <section className="card form-card">
+        <div className="card-label">CONFIGURACIÓN</div><h3>Diseña los dos análisis</h3>
+        <div className="awareness-source-picker"><div className="awareness-source-heading"><b>Preguntas categorizadas para consolidar las marcas</b><button className="button-text" onClick={() => setClassIds(classIds.length === brandClasses.length ? [] : brandClasses.map((item) => item.id))}>{classIds.length === brandClasses.length ? 'Desmarcar todas' : 'Seleccionar todas'}</button></div><div className="awareness-source-list">{brandClasses.map((item) => <label key={item.id}><input type="checkbox" checked={classIds.includes(item.id)} onChange={(event) => setClassIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} /><span>{item.question}</span></label>)}</div><small className="field-help">El catálogo de marcas se consolida con las preguntas seleccionadas; cuando una pregunta ya está categorizada, se usan sus etiquetas guardadas y corregidas.</small></div>
+        {analyses.map((analysis, index) => <div className="awareness-profile" key={analysis.name}>
+          <div className="card-label mt-12">{analysis.name.toUpperCase()}</div>
+          <div className="form-grid-two"><label>TOM · pregunta base<select value={analysis.tom_column} onChange={(e) => updateAnalysis(index, { tom_column: e.target.value })}><option value="">Sin TOM</option>{study.columns.map((c: string) => <option key={c}>{c}</option>)}</select><small className="field-help">Agrupa automáticamente las columnas hermanas del mismo código.</small></label>{multiSelect(index, 'Espontáneo · preguntas', 'spontaneous_columns')}</div>
+          {multiSelect(index, 'Ayudado · preguntas', 'aided_columns')}
+        </div>)}
+        {!analysesReady && <small className="field-help">Configura al menos una pregunta en cada análisis para obtener AWA Marca y AWA Publicitario.</small>}
+        <div className="form-grid-two mt-12"><label>Segmento opcional<select value={segment} onChange={(e) => { setSegment(e.target.value); setSegmentValue('') }}><option value="">Total</option>{study.columns.map((c: string) => <option key={c}>{c}</option>)}</select></label>{segment && <label>Valor del segmento<select value={segmentValue} onChange={(e) => setSegmentValue(e.target.value)}>{segmentValues.map((v) => <option key={v} value={v}>{v}</option>)}</select></label>}</div>
+        <div className="card-label mt-12">VARIABLES DEMOGRÁFICAS</div><div className="form-grid-two">{Object.entries(demographics).map(([key, value]) => <label key={key}>{key[0].toUpperCase() + key.slice(1)}<select value={value} onChange={(e) => setDemographics({ ...demographics, [key]: e.target.value })}><option value="">No usar</option>{study.columns.map((c: string) => <option key={c}>{c}</option>)}</select></label>)}</div>
+        <button className="button-primary full-width" onClick={calculate} disabled={busy || !classIds.length || !analysesReady}>{busy ? <><LoaderCircle className="spin" size={16} /> Calculando…</> : <><BarChart3 size={16} /> Calcular ambos análisis</>}</button>
+      </section>
+      <section className="card awareness-result">
+        <div className="card-heading"><div><div className="card-label">RESULTADOS</div><h3>Awareness por tipo</h3></div>{result && <span className="base-chip">Base: <b>{result.base}</b></span>}</div>
+        {resultAnalyses.length ? resultAnalyses.map((analysis: any) => {
+          const chartRows = analysis.rows.map((r: any) => ({ name: r.Entidad, tom: r['TOM %'], espontaneo: r['Espontaneo %'], ayudado: r['Ayudado %'] }))
+          return <div className="awareness-analysis-result" key={analysis.name}>
+            <h4>{analysis.name}</h4>
+            <div className="chart-wrap"><ResponsiveContainer width="100%" height={Math.max(260, chartRows.length * 40)}><BarChart data={chartRows} layout="vertical" margin={{ left: 18, right: 26 }}><CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e9edf3" /><XAxis type="number" tickFormatter={(v) => `${Math.round(v * 100)}%`} axisLine={false} tickLine={false} /><YAxis type="category" dataKey="name" width={130} axisLine={false} tickLine={false} /><Tooltip formatter={(v: any) => `${(Number(v) * 100).toFixed(1)}%`} /><Bar dataKey="tom" name="TOM" stackId="a" fill="#315bdb" /><Bar dataKey="espontaneo" name="Espontáneo" stackId="a" fill="#18a994" /><Bar dataKey="ayudado" name="Ayudado" stackId="a" fill="#ef9b46" /></BarChart></ResponsiveContainer></div>
+            <div className="table-scroll"><table><thead><tr><th>Marca</th><th>TOM</th><th>Espontáneo</th><th>Ayudado</th><th>AWA</th></tr></thead><tbody>{analysis.rows.map((r: any) => <tr key={r.Entidad}><td>{r.Entidad}</td><td>{(r['TOM %'] * 100).toFixed(1)}%</td><td>{(r['Espontaneo %'] * 100).toFixed(1)}%</td><td>{(r['Ayudado %'] * 100).toFixed(1)}%</td><td><b>{(r['AWA %'] * 100).toFixed(1)}%</b></td></tr>)}</tbody></table></div>
+          </div>
+        }) : <div className="empty-panel large-empty"><div className="empty-icon"><UsersRound size={20} /></div><b>Configura ambos análisis</b><span>El flujo usará las respuestas categorizadas y calculará TOM, espontáneo y ayudado por separado para cada perfil.</span></div>}
+      </section>
+    </div>
   </>
 }
 

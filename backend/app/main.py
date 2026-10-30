@@ -17,7 +17,7 @@ from .db import Base, engine, get_db
 from .models import Classification, ClassificationDraft, Respondent, Study
 from .auth_models import User, UserApiKey
 from .security import (create_access_token, decrypt_api_key, email_is_allowed, encrypt_api_key, hash_password, token_subject, validate_security_config, verify_password)
-from .schemas import AwarenessRequest, ClassificationDraftRequest, ClassifyRequest, LabelsBatchEdit, ProposeRequest
+from .schemas import AwarenessAnalysisRequest, AwarenessRequest, ClassificationDraftRequest, ClassifyRequest, LabelsBatchEdit, ProposeRequest
 from .services import create_llm, create_study, dataframe_for_study, excel_sheets, get_study
 from pydantic import BaseModel, Field
 from sqlalchemy import func
@@ -611,36 +611,70 @@ def calculate_awareness(study_id: str, request: AwarenessRequest, db: Session = 
     entities = request.entities or merged_entities
     if not entities:
         raise HTTPException(400, "No hay marcas para analizar.")
-    invalid_cols = [column for column in [request.tom_column, *request.spontaneous_columns,
-                    *request.aided_columns, *request.demographics.values(), request.segment_column]
-                    if column and column not in frame.columns]
+
+    analysis_requests = request.analyses or [AwarenessAnalysisRequest(
+        name="Awareness",
+        tom_column=request.tom_column,
+        spontaneous_columns=request.spontaneous_columns,
+        aided_columns=request.aided_columns,
+    )]
+    active_analyses = [
+        item for item in analysis_requests
+        if item.tom_column or item.spontaneous_columns or item.aided_columns
+    ]
+    if not active_analyses:
+        raise HTTPException(400, "Configura al menos una pregunta TOM, espontánea o ayudada en uno de los análisis.")
+
+    invalid_cols = [
+        column for item in active_analyses
+        for column in [item.tom_column, *item.spontaneous_columns, *item.aided_columns]
+        if column and column not in frame.columns
+    ]
+    invalid_cols.extend(
+        column for column in [*request.demographics.values(), request.segment_column]
+        if column and column not in frame.columns
+    )
     if invalid_cols:
         raise HTTPException(400, f"Columnas desconocidas: {', '.join(invalid_cols)}")
     demo_cols = {key: request.demographics.get(key) or None for key in
                  ("sexo", "edad", "departamento", "estrato", "ingreso")}
-    config = {
-        "name": "Awareness", "tom": request.tom_column or "0",
-        "esp": "\n".join(request.spontaneous_columns) or "0",
-        "ayu": "\n".join(request.aided_columns) or "0",
-    }
-    try:
-        _, indicators, _ = awareness.build_analysis(
-            frame, demo_cols, config, entities, merged_aliases, [], 0
+    categorized_items = db.scalars(
+        select(Classification).where(
+            Classification.study_id == study_id,
+            Classification.kind == "brands",
         )
+    ).all()
+    analysis_frame = awareness.frame_with_categorized_responses(frame, categorized_items)
+    try:
         selected_value = request.segment_value
         if request.segment_column:
             frame[request.segment_column] = frame[request.segment_column].fillna("Sin dato").astype(str)
-        table = awareness.category_table(
-            indicators, frame, request.segment_column or None,
-            selected_value if request.segment_column else None, entities,
-        )
+            analysis_frame[request.segment_column] = frame[request.segment_column]
+        analysis_results = []
+        for item in active_analyses:
+            config = {
+                "name": item.name or "Awareness",
+                "tom": item.tom_column or "0",
+                "esp": "\n".join(item.spontaneous_columns) or "0",
+                "ayu": "\n".join(item.aided_columns) or "0",
+            }
+            _, indicators, _ = awareness.build_analysis(
+                analysis_frame, demo_cols, config, entities, merged_aliases, [], 0
+            )
+            table = awareness.category_table(
+                indicators, analysis_frame, request.segment_column or None,
+                selected_value if request.segment_column else None, entities,
+            )
+            analysis_results.append({"name": config["name"], "rows": table.to_dict(orient="records")})
     except Exception as exc:
         raise HTTPException(400, f"No se pudo calcular Awareness: {exc}") from exc
+    base = len(frame) if not request.segment_column else int(
+        (analysis_frame[request.segment_column].fillna("Sin dato").astype(str) == selected_value).sum()
+    )
     return {
-        "base": len(frame) if not request.segment_column else int(
-            (frame[request.segment_column].fillna("Sin dato").astype(str) == selected_value).sum()
-        ),
+        "base": base,
         "segment_column": request.segment_column,
         "segment_value": selected_value,
-        "rows": table.to_dict(orient="records"),
+        "analyses": analysis_results,
+        "rows": analysis_results[0]["rows"],
     }
