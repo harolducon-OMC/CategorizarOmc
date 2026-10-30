@@ -186,7 +186,7 @@ function App() {
           }} busy={busy} onDelete={deleteStudy} onGo={setPage} />}
           {page === 'categorize' && <CategorizeWorkflow study={study} apiKey={apiKey} provider={provider} model={model} onRefresh={refreshStudy} onNotice={setNotice} busy={busy} setBusy={setBusy} />}
           {page === 'dashboard' && <DashboardPage study={study} apiKey={apiKey} provider={provider} model={model} onNotice={setNotice} />}
-          {page === 'awareness' && <AwarenessPage study={study} onNotice={setNotice} />}
+          {page === 'awareness' && <AwarenessPage />}
           {page === 'settings' && <SettingsPage provider={provider} model={model} apiKey={apiKey} setApiKey={setApiKey} onProvider={changeProvider} setModel={setModel} />}
         </div>
         <footer className="footer-note">Insights Studio · OMC <span>© 2026 Harold Ducon and Research.</span></footer>
