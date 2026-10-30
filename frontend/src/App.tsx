@@ -12,6 +12,7 @@ import {
 import CategorizeWorkflow from './CategorizeWorkflow'
 import AwarenessStandalone from './AwarenessStandalone'
 import FlowGuide from './FlowGuide'
+import './AwarenessFlow.css'
 
 type Page = 'home' | 'categorize' | 'dashboard' | 'awareness' | 'settings'
 type Study = { id: string; name: string; source_filename: string; columns: string[]; row_count: number; created_at: string }
@@ -25,9 +26,14 @@ type Frequency = { Categoría: string; Menciones: number; '%': number }
 type ReviewRow = { row_index: number; response: string | null; labels: string[] }
 type AwarenessProfile = {
   name: string
-  tom_column: string
-  spontaneous_columns: string[]
-  aided_columns: string[]
+  tom_code: string
+  spontaneous_codes: string
+  aided_codes: string
+}
+type AwarenessValidationRow = { tipo: string; campo: string; columnas: string }
+
+function splitQuestionCodes(value: string): string[] {
+  return value.split(/[,\n]+/).map((code) => code.trim()).filter((code) => code && code !== '0')
 }
 
 const COLORS = ['#315bdb', '#18a994', '#ef9b46', '#8158cb', '#db6482', '#5e7f90', '#a9b548']
@@ -494,19 +500,24 @@ function AwarenessPage({ study, onNotice }: any) {
   const brandClasses: Classification[] = (study?.classifications || []).filter((item: Classification) => item.kind === 'brands')
   const [classIds, setClassIds] = useState<string[]>([])
   const [analyses, setAnalyses] = useState<AwarenessProfile[]>([
-    { name: 'AWA Marca', tom_column: '', spontaneous_columns: [], aided_columns: [] },
-    { name: 'AWA Publicitario', tom_column: '', spontaneous_columns: [], aided_columns: [] },
+    { name: 'AWA Marca', tom_code: '', spontaneous_codes: '', aided_codes: '' },
+    { name: 'AWA Publicitario', tom_code: '', spontaneous_codes: '', aided_codes: '' },
   ])
   const [demographics, setDemographics] = useState<Record<string, string>>({ sexo: '', edad: '', departamento: '', estrato: '', ingreso: '' })
   const [segment, setSegment] = useState('')
   const [segmentValue, setSegmentValue] = useState('')
   const [segmentValues, setSegmentValues] = useState<string[]>([])
+  const [validation, setValidation] = useState<AwarenessValidationRow[]>([])
+  const [validationBusy, setValidationBusy] = useState(false)
+  const [validationError, setValidationError] = useState('')
   const [result, setResult] = useState<any>(null)
   const [busy, setBusy] = useState(false)
-  const [authChecked, setAuthChecked] = useState(false)
-  const [userEmail, setUserEmail] = useState('')
   const brandClass = brandClasses.find((item) => item.id === classIds[0]) || brandClasses[0]
-  const analysesReady = analyses.every((item) => [item.tom_column, ...item.spontaneous_columns, ...item.aided_columns].some(Boolean))
+  const studyColumns = study?.columns || []
+  const studyColumnsKey = studyColumns.join('\u0000')
+  const analysesReady = analyses.every((item) =>
+    [item.tom_code, item.spontaneous_codes, item.aided_codes].some((value) => splitQuestionCodes(value).length > 0)
+  )
   function updateAnalysis(index: number, changes: Partial<AwarenessProfile>) {
     setAnalyses((current) => current.map((item, currentIndex) => currentIndex === index ? { ...item, ...changes } : item))
   }
@@ -522,13 +533,61 @@ function AwarenessPage({ study, onNotice }: any) {
       setSegmentValue((current) => result.values.includes(current) ? current : (result.values[0] || ''))
     }).catch((err) => onNotice({ text: err.message, error: true }))
   }, [study?.id, segment])
+  useEffect(() => {
+    if (!study?.id || !studyColumns.length) {
+      setValidation([])
+      setValidationBusy(false)
+      setValidationError('')
+      return
+    }
+    let current = true
+    setValidationBusy(true)
+    setValidationError('')
+    const timer = window.setTimeout(() => {
+      const config = {
+        entities: ['Validación'],
+        aliases: {},
+        normalizations: [],
+        demographics,
+        analyses: analyses.map((item) => ({
+          name: item.name,
+          tom: item.tom_code,
+          esp: item.spontaneous_codes,
+          ayu: item.aided_codes,
+        })),
+        max_rows: 0,
+        expected_raw_cols: 0,
+      }
+      api<{ rows: AwarenessValidationRow[] }>('/api/awareness-flex/validate', {
+        method: 'POST',
+        body: JSON.stringify({ columns: studyColumns, config }),
+      }).then((response) => {
+        if (current) setValidation(response.rows)
+      }).catch((err) => {
+        if (current) setValidationError((err as Error).message)
+      }).finally(() => {
+        if (current) setValidationBusy(false)
+      })
+    }, 300)
+    return () => {
+      current = false
+      window.clearTimeout(timer)
+    }
+  }, [study?.id, studyColumnsKey, analyses, demographics])
   async function calculate() {
     if (!study || !brandClass || !classIds.length || !analysesReady) return
     setBusy(true)
     try {
       setResult(await api<any>(`/api/studies/${study.id}/awareness`, {
         method: 'POST', body: JSON.stringify({
-          classification_id: classIds[0], classification_ids: classIds, analyses,
+          classification_id: classIds[0],
+          classification_ids: classIds,
+          analyses: analyses.map((item) => ({
+            name: item.name,
+            tom_column: splitQuestionCodes(item.tom_code).join('\n') || '0',
+            spontaneous_columns: splitQuestionCodes(item.spontaneous_codes),
+            aided_columns: splitQuestionCodes(item.aided_codes),
+          })),
           demographics, segment_column: segment, segment_value: segmentValue,
         }),
       }))
@@ -537,23 +596,66 @@ function AwarenessPage({ study, onNotice }: any) {
   }
   if (!study) return <EmptyState title="Carga o selecciona un estudio" text="Awareness utiliza las columnas de una encuesta y una lista de marcas." action="Ir a Inicio" />
   if (!brandClasses.length) return <EmptyState title="Primero detecta marcas" text="Clasifica una pregunta de tipo Marcas para reutilizar sus marcas y alias en Awareness." action="Ir a Categorización" />
-  const multiSelect = (index: number, label: string, key: 'spontaneous_columns' | 'aided_columns') => <label>{label}<select multiple value={analyses[index][key]} onChange={(e) => updateAnalysis(index, { [key]: Array.from(e.target.selectedOptions).map((o) => o.value) })}>{(study.columns || []).map((c: string) => <option key={c}>{c}</option>)}</select><small className="field-help">Puedes seleccionar una pregunta base; sus columnas con sufijo como _1 y _2 se agrupan automáticamente. Mantén Ctrl/Cmd para elegir varias preguntas.</small></label>
+  const validationRows = validation.filter((row) => {
+    if (row.tipo === 'Demográfico') return splitQuestionCodes(demographics[row.campo] || '').length > 0
+    const profile = analyses.find((item) => row.tipo.endsWith(item.name))
+    if (!profile) return false
+    const code = row.campo === 'TOM' ? profile.tom_code
+      : row.campo === 'Espontáneo' ? profile.spontaneous_codes : profile.aided_codes
+    return splitQuestionCodes(code).length > 0
+  })
   const resultAnalyses = result?.analyses || (result ? [{ name: 'Awareness', rows: result.rows || [] }] : [])
   return <>
     <PageHeading eyebrow="RECORDACIÓN DE MARCA" title="Awareness" text="Configura Top of Mind, recordación espontánea y ayudada a partir de las marcas detectadas." />
     <div className="awareness-layout">
-      <section className="card form-card">
-        <div className="card-label">CONFIGURACIÓN</div><h3>Diseña los dos análisis</h3>
-        <div className="awareness-source-picker"><div className="awareness-source-heading"><b>Preguntas categorizadas para consolidar las marcas</b><button className="button-text" onClick={() => setClassIds(classIds.length === brandClasses.length ? [] : brandClasses.map((item) => item.id))}>{classIds.length === brandClasses.length ? 'Desmarcar todas' : 'Seleccionar todas'}</button></div><div className="awareness-source-list">{brandClasses.map((item) => <label key={item.id}><input type="checkbox" checked={classIds.includes(item.id)} onChange={(event) => setClassIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} /><span>{item.question}</span></label>)}</div><small className="field-help">El catálogo de marcas se consolida con las preguntas seleccionadas; cuando una pregunta ya está categorizada, se usan sus etiquetas guardadas y corregidas.</small></div>
-        {analyses.map((analysis, index) => <div className="awareness-profile" key={analysis.name}>
-          <div className="card-label mt-12">{analysis.name.toUpperCase()}</div>
-          <div className="form-grid-two"><label>TOM · pregunta base<select value={analysis.tom_column} onChange={(e) => updateAnalysis(index, { tom_column: e.target.value })}><option value="">Sin TOM</option>{study.columns.map((c: string) => <option key={c}>{c}</option>)}</select><small className="field-help">Agrupa automáticamente las columnas hermanas del mismo código.</small></label>{multiSelect(index, 'Espontáneo · preguntas', 'spontaneous_columns')}</div>
-          {multiSelect(index, 'Ayudado · preguntas', 'aided_columns')}
-        </div>)}
-        {!analysesReady && <small className="field-help">Configura al menos una pregunta en cada análisis para obtener AWA Marca y AWA Publicitario.</small>}
-        <div className="form-grid-two mt-12"><label>Segmento opcional<select value={segment} onChange={(e) => { setSegment(e.target.value); setSegmentValue('') }}><option value="">Total</option>{study.columns.map((c: string) => <option key={c}>{c}</option>)}</select></label>{segment && <label>Valor del segmento<select value={segmentValue} onChange={(e) => setSegmentValue(e.target.value)}>{segmentValues.map((v) => <option key={v} value={v}>{v}</option>)}</select></label>}</div>
-        <div className="card-label mt-12">VARIABLES DEMOGRÁFICAS</div><div className="form-grid-two">{Object.entries(demographics).map(([key, value]) => <label key={key}>{key[0].toUpperCase() + key.slice(1)}<select value={value} onChange={(e) => setDemographics({ ...demographics, [key]: e.target.value })}><option value="">No usar</option>{study.columns.map((c: string) => <option key={c}>{c}</option>)}</select></label>)}</div>
-        <button className="button-primary full-width" onClick={calculate} disabled={busy || !classIds.length || !analysesReady}>{busy ? <><LoaderCircle className="spin" size={16} /> Calculando…</> : <><BarChart3 size={16} /> Calcular ambos análisis</>}</button>
+      <section className="card form-card awareness-config-card">
+        <div className="card-label">CONFIGURACIÓN</div>
+        <div className="awareness-config-heading"><div><h3>Configura los dos análisis</h3><p>Escribe los códigos de pregunta, como en Awareness independiente.</p></div><span className="base-chip">{study.row_count.toLocaleString()} respuestas</span></div>
+        <div className="awareness-source-picker">
+          <div className="awareness-source-heading"><b>Preguntas categorizadas para consolidar las marcas</b><button className="button-text" onClick={() => setClassIds(classIds.length === brandClasses.length ? [] : brandClasses.map((item) => item.id))}>{classIds.length === brandClasses.length ? 'Desmarcar todas' : 'Seleccionar todas'}</button></div>
+          <div className="awareness-source-list">{brandClasses.map((item) => <label key={item.id}><input type="checkbox" checked={classIds.includes(item.id)} onChange={(event) => setClassIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} /><span>{item.question}</span></label>)}</div>
+          <small className="field-help">El catálogo se consolida con las preguntas seleccionadas. Si una ya está categorizada, se usan sus etiquetas corregidas.</small>
+        </div>
+
+        <div className="awareness-profiles-grid">
+          {analyses.map((analysis, index) => <section className="awareness-profile" key={analysis.name}>
+            <div className="awareness-profile-heading"><span className="card-label">{index === 0 ? 'ANÁLISIS 1' : 'ANÁLISIS 2'}</span><h4>{analysis.name}</h4></div>
+            <label>TOM · código de pregunta
+              <input className="awareness-code-input" value={analysis.tom_code} onChange={(e) => updateAnalysis(index, { tom_code: e.target.value })} placeholder="Ej. CE1" />
+            </label>
+            <label>Espontáneo · código(s)
+              <textarea className="awareness-code-input" rows={2} value={analysis.spontaneous_codes} onChange={(e) => updateAnalysis(index, { spontaneous_codes: e.target.value })} placeholder={'Ej. CE2\nCE3'} />
+            </label>
+            <label>Ayudado · código(s)
+              <textarea className="awareness-code-input" rows={2} value={analysis.aided_codes} onChange={(e) => updateAnalysis(index, { aided_codes: e.target.value })} placeholder={'Ej. CE4\nCE5'} />
+            </label>
+            <small className="field-help">Puedes separar preguntas con comas o saltos de línea. Un código base agrupa sus sufijos (`_1`, `_2`) sin incluir códigos como `CE10`.</small>
+          </section>)}
+        </div>
+        {!analysesReady && <div className="info-callout awareness-hint"><Check size={16} /><span>Completa al menos un código en cada perfil para calcular AWA Marca y AWA Publicitario.</span></div>}
+
+        <section className="awareness-validation">
+          <div className="awareness-validation-heading"><div><div className="card-label">REVISIÓN DE CÓDIGOS</div><h4>Validación de columnas</h4></div><span className="base-chip">{validationBusy ? 'Validando…' : `${validationRows.length} campos`}</span></div>
+          {validationError ? <div className="auth-error" role="alert">{validationError}</div> : validationRows.length ? (
+            <div className="table-scroll awa-validation awareness-flow-validation">
+              <table><thead><tr><th>Tipo</th><th>Campo</th><th>Columna detectada</th></tr></thead>
+                <tbody>{validationRows.map((row, index) => <tr key={`${row.tipo}-${row.campo}-${index}`}><td>{row.tipo}</td><td>{row.campo}</td><td>{row.columnas || <span className="awa-missing">No detectada</span>}</td></tr>)}</tbody>
+              </table>
+            </div>
+          ) : <div className="info-callout"><Check size={16} /><span>Escribe códigos de pregunta para ver las columnas detectadas.</span></div>}
+        </section>
+
+        <div className="awareness-options-grid">
+          <label>Segmento opcional
+            <select value={segment} onChange={(e) => { setSegment(e.target.value); setSegmentValue('') }}><option value="">Total</option>{studyColumns.map((column: string) => <option key={column}>{column}</option>)}</select>
+          </label>
+          {segment && <label>Valor del segmento
+            <select value={segmentValue} onChange={(e) => setSegmentValue(e.target.value)}>{segmentValues.map((value) => <option key={value} value={value}>{value}</option>)}</select>
+          </label>}
+        </div>
+        <div className="card-label mt-12">VARIABLES DEMOGRÁFICAS</div>
+        <div className="awareness-demographics-grid">{Object.entries(demographics).map(([key, value]) => <label key={key}>{key[0].toUpperCase() + key.slice(1)}<select value={value} onChange={(e) => setDemographics({ ...demographics, [key]: e.target.value })}><option value="">No usar</option>{studyColumns.map((column: string) => <option key={column}>{column}</option>)}</select></label>)}</div>
+        <button className="button-primary full-width mt-12" onClick={calculate} disabled={busy || !classIds.length || !analysesReady}>{busy ? <><LoaderCircle className="spin" size={16} /> Calculando…</> : <><BarChart3 size={16} /> Calcular ambos análisis</>}</button>
       </section>
       <section className="card awareness-result">
         <div className="card-heading"><div><div className="card-label">RESULTADOS</div><h3>Awareness por tipo</h3></div>{result && <span className="base-chip">Base: <b>{result.base}</b></span>}</div>
