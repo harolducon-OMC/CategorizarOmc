@@ -157,7 +157,7 @@ function App() {
         <div className="sidebar-spacer" />
         <div className="sidebar-tip"><div className="tip-icon"><CircleHelp size={17} /></div><div><b>¿Necesitas ayuda?</b><span>Consulta la guía local del proyecto.</span></div></div>
         <button className={`nav-button settings-link ${page === 'settings' ? 'active' : ''}`} onClick={() => setPage('settings')}><Settings2 size={18} /><span>Ajustes</span></button>
-        <div className="local-status"><span className="online-dot" /> Todo corre en tu computador</div>
+        <div className="local-status"><span className="online-dot" /> © 2026 Propiedad OMC</div>
       </aside>
 
       <main className="main-area">
@@ -189,7 +189,7 @@ function App() {
           {page === 'awareness' && <AwarenessPage study={study} onNotice={setNotice} />}
           {page === 'settings' && <SettingsPage provider={provider} model={model} apiKey={apiKey} setApiKey={setApiKey} onProvider={changeProvider} setModel={setModel} />}
         </div>
-        <footer className="footer-note">Insights Studio · Entorno local <span>Los datos y resultados se guardan en tu PostgreSQL.</span></footer>
+        <footer className="footer-note">Insights Studio · OMC <span>© 2026 Harold Ducon and Research.</span></footer>
       </main>
     </div>
   )
