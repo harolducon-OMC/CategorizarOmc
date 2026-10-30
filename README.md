@@ -18,7 +18,7 @@ Primera migración local de la Plataforma de Insights. Mantiene en Python la ló
 - Flujo de categorización por pregunta con tres pasos: configurar, revisar catálogo y clasificar/editar; los catálogos aún no aplicados quedan guardados por estudio y pregunta en `classification_drafts`.
 - Navegación de preguntas con estado pendiente/borrador/lista; al completar una pregunta puedes pasar a la siguiente sin perder los resultados anteriores.
 - Selector desplegable de proveedor, modelo y clave temporal de sesión en la barra superior; la gestión persistente de claves se encuentra en Ajustes.
-- Awareness TOM, espontáneo y ayudado a partir de una o varias clasificaciones de marcas; permite consolidar sus entidades y alias antes de calcular, con filtros por segmentos y variables demográficas.
+- Módulo Awareness autónomo basado en la aplicación Streamlit original: carga directamente CSV/XLSX, ofrece modos Bancos, Conglomerados y Personalizado, configura entidades, alias, normalizaciones, preguntas y demográficos, valida columnas y exporta el reporte Excel sin depender de un estudio ni del flujo de categorización. Corre como servicio separado en el puerto 8501.
 - API documentada automáticamente en `http://localhost:8000/docs`.
 
 El acceso requiere login y el registro limita el correo al dominio configurado. Los tokens de acceso JWT expiran según `ACCESS_TOKEN_MINUTES`. La clasificación por diccionario se combina con el clasificador LLM actual. Las llamadas largas de IA se procesan en la petición actual; para despliegue multiusuario conviene añadir worker/cola, auditoría y almacenamiento de archivos más robusto.

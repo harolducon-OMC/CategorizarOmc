@@ -41,6 +41,17 @@ services:
       timeout: 5s
       retries: 10
 
+  awareness:
+    build: ./awareness
+    restart: unless-stopped
+    ports:
+      - "8501:8501"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   web:
     build: ./frontend
     restart: unless-stopped
