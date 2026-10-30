@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func
 from core import awareness, brands, coding, export, insights
 from core.llm import PROVIDER_CONFIG
+from .awareness_flex import router as awareness_flex_router
 
 app = FastAPI(title="Plataforma de Insights API", version="1.0.0")
 @app.middleware("http")
@@ -42,6 +43,8 @@ async def security_middleware(request: Request, call_next):
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Cache-Control"] = "no-store" if path.startswith("/api/auth") else "no-cache"
     return response
+
+app.include_router(awareness_flex_router)
 
 
 CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",") if o.strip()]
