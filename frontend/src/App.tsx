@@ -11,6 +11,7 @@ import {
 } from 'recharts'
 import CategorizeWorkflow from './CategorizeWorkflow'
 import AwarenessStandalone from './AwarenessStandalone'
+import FlowGuide from './FlowGuide'
 
 type Page = 'home' | 'categorize' | 'dashboard' | 'awareness' | 'settings'
 type Study = { id: string; name: string; source_filename: string; columns: string[]; row_count: number; created_at: string }
@@ -240,6 +241,7 @@ function HomePage({ studies, study, onUpload, busy, onDelete, onGo }: {
   const [sheets, setSheets] = useState<string[]>([])
   const [uploadError, setUploadError] = useState('')
   const [dragging, setDragging] = useState(false)
+  const [guideOpen, setGuideOpen] = useState(false)
   async function selectFile(next: File | null) {
     setFile(next); setUploadError(''); setSheets([]); setSheet('')
     if (!next) return
@@ -256,7 +258,8 @@ function HomePage({ studies, study, onUpload, busy, onDelete, onGo }: {
   }
   return <>
     <PageHeading eyebrow="VISTA GENERAL" title="Tu espacio de análisis" text="Carga una encuesta, categoriza respuestas y convierte la voz de tus clientes en decisiones." action={<div className="secure-chip"><Database size={15} /> Privado en tu entorno</div>} />
-    <div className="welcome-strip"><div className="welcome-icon"><Sparkles size={19} /></div><div><b>Bienvenido a Insights Studio</b><span>Un flujo de investigación más claro: importa, codifica, explora y exporta desde una sola vista.</span></div><button onClick={() => onGo(study ? 'categorize' : 'home')}>Ver flujo <ArrowRight size={15} /></button></div>
+    <div className="welcome-strip"><div className="welcome-icon"><Sparkles size={19} /></div><div><b>Bienvenido a Insights Studio</b><span>Un flujo de investigación más claro: importa, codifica, explora y exporta desde una sola vista.</span></div><button onClick={() => setGuideOpen(true)}>Ver flujo <ArrowRight size={15} /></button></div>
+    {guideOpen && <FlowGuide hasStudy={!!study} onClose={() => setGuideOpen(false)} onGo={onGo} />}
     <div className="section-title-row"><div><h2>Importar una encuesta</h2><p>Se guardará en PostgreSQL para continuar después.</p></div><span className="file-limit">CSV o XLSX · Hasta 25 MB</span></div>
     <div className="upload-layout">
       <div className={`upload-card ${dragging ? 'dragging' : ''}`} onDragOver={(e) => { e.preventDefault(); setDragging(true) }} onDragLeave={() => setDragging(false)} onDrop={(e) => { e.preventDefault(); setDragging(false); selectFile(e.dataTransfer.files[0] || null) }}>
