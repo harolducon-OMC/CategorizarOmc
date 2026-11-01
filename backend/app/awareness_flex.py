@@ -49,6 +49,18 @@ def validate_columns(request: ValidateRequest):
     return {"rows": awareness_flex.detect_columns(request.columns, config)}
 
 
+@router.post("/suggest")
+async def suggest_brands(file: UploadFile = File(...), config: str = Form(...), sheet: str = Form("")):
+    """Propone la lista de marcas a partir de las respuestas (agrupa las escritas parecido)."""
+    cfg = _config_or_400(config)
+    raw = await file.read()
+    frame = _read_dataframe(raw, file.filename or "datos.csv", sheet or None)
+    try:
+        return awareness_flex.suggest_entities(frame, cfg)
+    except Exception as exc:
+        raise HTTPException(400, f"No se pudo proponer marcas: {exc}") from exc
+
+
 @router.post("/preview")
 async def preview_awareness(file: UploadFile = File(...), config: str = Form(...), sheet: str = Form("")):
     cfg = _config_or_400(config)

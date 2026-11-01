@@ -12,6 +12,7 @@ import {
 import CategorizeWorkflow from './CategorizeWorkflow'
 import AwarenessStandalone from './AwarenessStandalone'
 import FlowGuide from './FlowGuide'
+import SegmentExplorer from './SegmentExplorer'
 
 type Page = 'home' | 'categorize' | 'dashboard' | 'awareness' | 'settings'
 type Study = { id: string; name: string; source_filename: string; columns: string[]; row_count: number; created_at: string }
@@ -65,8 +66,15 @@ function App() {
   const [studies, setStudies] = useState<Study[]>([])
   const [studyId, setStudyId] = useState(localStorage.getItem('insights-study') || '')
   const [study, setStudy] = useState<any>(null)
-  const [provider, setProvider] = useState('gemini')
-  const [model, setModel] = useState(PROVIDERS.gemini.model)
+  const [provider, setProvider] = useState(() => {
+    const saved = localStorage.getItem('insights-provider') || ''
+    return PROVIDERS[saved] ? saved : 'gemini'
+  })
+  const [model, setModel] = useState(() => {
+    const saved = localStorage.getItem('insights-provider') || ''
+    return localStorage.getItem('insights-model') || PROVIDERS[saved]?.model || PROVIDERS.gemini.model
+  })
+  const [savedKeys, setSavedKeys] = useState<{ providers: string[]; unreadable: string[] }>({ providers: [], unreadable: [] })
   const [apiKey, setApiKey] = useState('')
   const [aiMenuOpen, setAiMenuOpen] = useState(false)
   const [notice, setNotice] = useState<{ text: string; error?: boolean } | null>(null)
@@ -125,6 +133,17 @@ function App() {
     setModel(PROVIDERS[value]?.model || '')
   }
 
+  // Proveedor y modelo se recuerdan en este navegador (nunca la clave).
+  useEffect(() => { localStorage.setItem('insights-provider', provider) }, [provider])
+  useEffect(() => { localStorage.setItem('insights-model', model) }, [model])
+
+  const refreshKeys = useCallback(() => {
+    api<{ providers: string[]; unreadable?: string[] }>('/api/me/api-keys')
+      .then((result) => setSavedKeys({ providers: result.providers, unreadable: result.unreadable || [] }))
+      .catch(() => {})
+  }, [])
+  useEffect(() => { if (userEmail) refreshKeys() }, [userEmail, refreshKeys])
+
   async function deleteStudy(id: string) {
     if (!window.confirm('¿Eliminar este estudio y sus clasificaciones guardadas? Esta acción no se puede deshacer.')) return
     try {
@@ -179,9 +198,9 @@ function App() {
           <div className="topbar-right">
             <div className="ai-quick-wrap">
               <button className={`ai-quick-toggle ${aiMenuOpen ? 'open' : ''}`} onClick={() => setAiMenuOpen(!aiMenuOpen)} aria-expanded={aiMenuOpen}>
-                <KeyRound size={14} /><span>IA · {PROVIDERS[provider]?.label || provider}</span><ChevronDown size={13} />
+                <KeyRound size={14} /><span>IA · {PROVIDERS[provider]?.label || provider}</span><span className={`key-dot ${savedKeys.unreadable.includes(provider) ? 'bad' : savedKeys.providers.includes(provider) ? 'ok' : 'none'}`} title={savedKeys.providers.includes(provider) ? 'Clave guardada' : 'Sin clave guardada'} /><ChevronDown size={13} />
               </button>
-              {aiMenuOpen && <div className="ai-quick-panel"><div className="ai-panel-heading"><div><b>Proveedor de IA</b><small>Configuración para esta sesión</small></div><button className="tiny-icon" onClick={() => setAiMenuOpen(false)} aria-label="Cerrar"><X size={15} /></button></div><label>Proveedor<select value={provider} onChange={(e) => changeProvider(e.target.value)}>{Object.entries(PROVIDERS).map(([id, item]) => <option key={id} value={id}>{item.label}</option>)}</select></label><label>Modelo<input value={model} onChange={(e) => setModel(e.target.value)} placeholder={PROVIDERS[provider]?.model} /></label><label>API key<input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Pega tu API key" autoComplete="off" /></label><small className="ai-panel-note">Solo memoria de esta pestaña; no se guarda en PostgreSQL.</small></div>}
+              {aiMenuOpen && <div className="ai-quick-panel"><div className="ai-panel-heading"><div><b>Proveedor de IA</b><small>Configuración para esta sesión</small></div><button className="tiny-icon" onClick={() => setAiMenuOpen(false)} aria-label="Cerrar"><X size={15} /></button></div><label>Proveedor<select value={provider} onChange={(e) => changeProvider(e.target.value)}>{Object.entries(PROVIDERS).map(([id, item]) => <option key={id} value={id}>{item.label}</option>)}</select></label><label>Modelo<input value={model} onChange={(e) => setModel(e.target.value)} placeholder={PROVIDERS[provider]?.model} /></label><div className={`key-status ${savedKeys.unreadable.includes(provider) ? 'bad' : savedKeys.providers.includes(provider) ? 'ok' : 'none'}`}>{savedKeys.unreadable.includes(provider) ? <>La clave guardada de {PROVIDERS[provider]?.label} no se puede leer. <button className="button-text" onClick={() => { setPage('settings'); setAiMenuOpen(false) }}>Guárdala de nuevo en Ajustes</button></> : savedKeys.providers.includes(provider) ? <>✓ Usando tu clave guardada de {PROVIDERS[provider]?.label}.</> : <>No hay clave guardada para {PROVIDERS[provider]?.label}. <button className="button-text" onClick={() => { setPage('settings'); setAiMenuOpen(false) }}>Guardar en Ajustes</button></>}</div>{savedKeys.providers.length > 0 && <small className="ai-panel-note">Claves guardadas: {savedKeys.providers.map((id) => PROVIDERS[id]?.label || id).join(', ')}.</small>}<label>Clave solo para esta sesión <span className="optional">OPCIONAL</span><input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={savedKeys.providers.includes(provider) ? 'Déjalo vacío para usar la guardada' : 'Pega tu API key'} autoComplete="off" /></label><small className="ai-panel-note">Si la escribes aquí, tiene prioridad y no se guarda en la base de datos.</small></div>}
             </div>
             {study && <span className="top-study"><Database size={14} /> {study.name}</span>}
             <span className="local-pill"><span className="online-dot" /> Local</span>
@@ -200,7 +219,7 @@ function App() {
           {page === 'categorize' && <CategorizeWorkflow study={study} apiKey={apiKey} provider={provider} model={model} onRefresh={refreshStudy} onNotice={setNotice} busy={busy} setBusy={setBusy} />}
           {page === 'dashboard' && <DashboardPage study={study} apiKey={apiKey} provider={provider} model={model} onNotice={setNotice} />}
           {page === 'awareness' && <AwarenessHub study={study} onNotice={setNotice} />}
-          {page === 'settings' && <SettingsPage provider={provider} model={model} apiKey={apiKey} setApiKey={setApiKey} onProvider={changeProvider} setModel={setModel} />}
+          {page === 'settings' && <SettingsPage provider={provider} model={model} apiKey={apiKey} setApiKey={setApiKey} onProvider={changeProvider} setModel={setModel} onKeysChanged={refreshKeys} />}
         </div>
         <footer className="footer-note">Insights Studio · OMC <span>© 2026 Harold Ducon and Research.</span></footer>
       </main>
@@ -386,8 +405,6 @@ function DashboardPage({ study, apiKey, provider, model, onNotice }: any) {
   const [selectedId, setSelectedId] = useState('')
   const [freq, setFreq] = useState<Frequency[]>([])
   const [base, setBase] = useState(0)
-  const [segments, setSegments] = useState<any[]>([])
-  const [segmentColumn, setSegmentColumn] = useState('')
   const [insight, setInsight] = useState<any>(null)
   const [reviewRows, setReviewRows] = useState<ReviewRow[]>([])
   const [reviewOffset, setReviewOffset] = useState(0)
@@ -401,11 +418,6 @@ function DashboardPage({ study, apiKey, provider, model, onNotice }: any) {
     api<{ base: number; rows: Frequency[] }>(`/api/classifications/${selected.id}/frequencies`).then((r) => { setFreq(r.rows); setBase(r.base) }).catch((e) => onNotice({ text: e.message, error: true }))
     api<any>(`/api/classifications/${selected.id}/rows?offset=0&limit=100`).then((r) => setReviewRows(r.rows)).catch(() => {})
   }, [selected?.id])
-  async function loadSegments() {
-    if (!selected || !segmentColumn) return
-    try { const result = await api<any>(`/api/classifications/${selected.id}/segments?column=${encodeURIComponent(segmentColumn)}`); setSegments(result.segments) }
-    catch (err) { onNotice({ text: (err as Error).message, error: true }) }
-  }
   async function loadMore() {
     if (!selected) return
     const next = reviewOffset + 100
@@ -458,16 +470,13 @@ function DashboardPage({ study, apiKey, provider, model, onNotice }: any) {
   return <>
     <PageHeading eyebrow="LECTURA DE RESULTADOS" title="Dashboard" text="Frecuencias, cortes por segmento y control de calidad de la codificación." action={<button className="button-secondary" disabled={subBusy} onClick={downloadExcel}><ArrowDownToLine size={16} /> Exportar Excel consolidado</button>} />
     <div className="dashboard-toolbar"><div className="select-icon"><Search size={15} /><select value={selected?.id || ''} onChange={(e) => setSelectedId(e.target.value)}>{classes.map((item) => <option key={item.id} value={item.id}>{item.question} · {item.kind === 'brands' ? 'Marcas' : item.kind === 'sentiment' ? 'Sentimiento' : 'Temas'}</option>)}</select></div><span className="base-chip"><UsersRound size={15} /> Base válida: <b>{base.toLocaleString()}</b></span></div>
-    <div className="dashboard-grid">
+    <div className="dashboard-grid dashboard-grid-single">
       <section className="card chart-card"><div className="card-heading"><div><div className="card-label">DISTRIBUCIÓN</div><h3>Frecuencia por categoría</h3></div><span className="soft-badge">{chartData.length} categorías</span></div>
         {chartData.length ? <div className="chart-wrap"><ResponsiveContainer width="100%" height={Math.max(300, chartData.length * 48)}><BarChart data={chartData} layout="vertical" margin={{ top: 8, right: 32, left: 16, bottom: 8 }}><CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e9edf3" /><XAxis type="number" tickFormatter={(v) => `${Math.round(v * 100)}%`} axisLine={false} tickLine={false} tick={{ fill: '#8b94a7', fontSize: 11 }} /><YAxis type="category" dataKey="name" width={140} axisLine={false} tickLine={false} tick={{ fill: '#4b566b', fontSize: 12 }} /><Tooltip formatter={(value: any, _name: any, props: any) => [`${(Number(value) * 100).toFixed(1)}% · ${props.payload.n} menciones`, 'Frecuencia']} contentStyle={{ border: '1px solid #e7eaf0', borderRadius: 10, fontSize: 12 }} /><Bar dataKey="pct" radius={[0, 5, 5, 0]} barSize={21}>{chartData.map((_item, index) => <Cell key={index} fill={COLORS[index % COLORS.length]} />)}<LabelList dataKey="pct" position="right" formatter={(v: any) => `${Math.round(Number(v) * 100)}%`} style={{ fill: '#647086', fontSize: 11 }} /></Bar></BarChart></ResponsiveContainer></div> : <div className="empty-inline">No hay respuestas válidas para graficar.</div>}
         <div className="frequency-table"><div className="table-scroll"><table><thead><tr><th>Categoría</th><th>Personas</th><th>Porcentaje</th></tr></thead><tbody>{freq.map((row) => <tr key={row.Categoría}><td><span className="color-dot" style={{ background: COLORS[freq.indexOf(row) % COLORS.length] }} />{row.Categoría}</td><td>{row.Menciones.toLocaleString()}</td><td>{(row['%'] * 100).toFixed(1)}%</td></tr>)}</tbody></table></div></div>
       </section>
-      <section className="card segment-card"><div className="card-label">COMPARACIÓN</div><h3>Explorar segmentos</h3><p>Compara la proporción de cada categoría entre grupos del estudio.</p><label>Segmentar por<select value={segmentColumn} onChange={(e) => { setSegmentColumn(e.target.value); setSegments([]) }}><option value="">Selecciona un campo</option>{(study.columns || []).filter((c: string) => c !== selected?.question).map((c: string) => <option key={c}>{c}</option>)}</select></label><button className="button-primary full-width" disabled={!segmentColumn} onClick={loadSegments}>Calcular cruce <ArrowRight size={15} /></button>
-        {segments.length > 0 && <div className="segment-results"><div className="table-scroll"><table><thead><tr><th>Segmento (base)</th>{selected?.categories.slice(0, 3).map((c: string) => <th key={c}>{c}</th>)}</tr></thead><tbody>{segments.map((row) => <tr key={row.segment}><td>{row.segment} <small>n={row.base}</small></td>{selected?.categories.slice(0, 3).map((c: string) => <td key={c}>{(Number(row[c] || 0) * 100).toFixed(0)}%</td>)}</tr>)}</tbody></table></div></div>}
-        <div className="small-note">Los segmentos con bases pequeñas deben interpretarse con cautela.</div>
-      </section>
     </div>
+    {selected && <SegmentExplorer classification={selected} columns={study.columns || []} freq={freq} onNotice={onNotice} />}
     <div className="section-title-row mt-28"><div><h2>Insights cualitativos</h2><p>La IA redacta a partir de respuestas reales; cifras y citas se controlan desde el código.</p></div><button className="button-secondary" disabled={subBusy} onClick={generate}><Sparkles size={16} /> {subBusy ? 'Generando…' : 'Generar insights'}</button></div>
     {insight?.categorias?.length ? <div className="insight-grid">{insight.resumen && <div className="summary-insight"><div className="insight-kicker"><Sparkles size={15} /> LECTURA GENERAL</div><p>{insight.resumen}</p></div>}{insight.categorias.map((item: any) => <article className="card insight-card" key={item.categoria}><div className="insight-top"><span className="insight-dot" /> <b>{item.categoria}</b><span>{item.n} respuestas · {(item.pct * 100).toFixed(0)}%</span></div><p>{item.explicacion}</p>{item.citas?.map((quote: string, i: number) => <blockquote key={i}>“{quote}”</blockquote>)}</article>)}</div> : <div className="empty-panel"><div className="empty-icon"><Sparkles size={19} /></div><b>¿Qué está diciendo tu audiencia?</b><span>Genera una síntesis temática con citas verificables de las respuestas.</span></div>}
     <div className="section-title-row mt-32"><div><h2>Revisión y edición manual</h2><p>Corrige una etiqueta por fila; el cambio se guarda directamente en PostgreSQL.</p></div><button className="button-primary" onClick={saveEdits} disabled={subBusy || !Object.keys(edits).length}><Check size={15} /> Guardar {Object.keys(edits).length ? `(${Object.keys(edits).length})` : 'cambios'}</button></div>
@@ -682,21 +691,22 @@ function AwarenessPage({ study, onNotice }: any) {
   </>
 }
 
-function SettingsPage({ provider, model, apiKey, setApiKey, onProvider, setModel }: any) {
+function SettingsPage({ provider, model, apiKey, setApiKey, onProvider, setModel, onKeysChanged }: any) {
   const [configured, setConfigured] = useState(false)
+  const [unreadable, setUnreadable] = useState(false)
   const [keyInput, setKeyInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   useEffect(() => {
     setKeyInput(''); setMessage('')
-    api<{providers: string[]}>('/api/me/api-keys').then((result) => setConfigured(result.providers.includes(provider))).catch((err) => setMessage((err as Error).message))
+    api<{providers: string[]; unreadable?: string[]}>('/api/me/api-keys').then((result) => { setConfigured(result.providers.includes(provider)); setUnreadable((result.unreadable || []).includes(provider)) }).catch((err) => setMessage((err as Error).message))
   }, [provider])
   async function saveKey() {
     if (!keyInput.trim()) { setMessage('Pega la API key para guardarla.'); return }
     setBusy(true); setMessage('')
     try {
       await api(`/api/me/api-keys/${encodeURIComponent(provider)}`, { method: 'PUT', body: JSON.stringify({ api_key: keyInput.trim() }) })
-      setConfigured(true); setKeyInput(''); setApiKey('')
+      setConfigured(true); setUnreadable(false); setKeyInput(''); setApiKey(''); onKeysChanged?.()
       setMessage('Clave guardada cifrada para tu usuario. Se utilizará automáticamente con este proveedor.')
     } catch (err) { setMessage((err as Error).message) } finally { setBusy(false) }
   }
@@ -704,13 +714,13 @@ function SettingsPage({ provider, model, apiKey, setApiKey, onProvider, setModel
     setBusy(true); setMessage('')
     try {
       await api(`/api/me/api-keys/${encodeURIComponent(provider)}`, { method: 'DELETE' })
-      setConfigured(false); setMessage('Clave guardada eliminada.')
+      setConfigured(false); setUnreadable(false); setMessage('Clave guardada eliminada.'); onKeysChanged?.()
     } catch (err) { setMessage((err as Error).message) } finally { setBusy(false) }
   }
   return <>
     <PageHeading eyebrow="PREFERENCIAS DE TU CUENTA" title="Ajustes" text="Guarda una API key por proveedor para que tus análisis la usen automáticamente. Puedes reemplazarla o eliminarla cuando quieras." />
     <div className="settings-layout"><section className="card form-card settings-card"><div className="card-label">PROVEEDOR DE IA</div><h3>Conexión del modelo</h3><label>Proveedor<select value={provider} onChange={(e) => onProvider(e.target.value)}>{Object.entries(PROVIDERS).map(([id, item]) => <option key={id} value={id}>{item.label}</option>)}</select></label><label>Modelo<input value={model} onChange={(e) => setModel(e.target.value)} placeholder={PROVIDERS[provider]?.model} /></label>
-      <div className="setting-key-status">{configured ? <><span className="online-dot" /> Ya guardaste una clave para {PROVIDERS[provider]?.label || provider}. No se vuelve a mostrar.</> : <>No hay una clave guardada para este proveedor.</>}</div>
+      <div className="setting-key-status">{unreadable ? <>⚠ Hay una clave guardada para {PROVIDERS[provider]?.label || provider}, pero no se puede leer (el servidor cambió su JWT_SECRET). Pega la clave de nuevo y guárdala.</> : configured ? <><span className="online-dot" /> Ya guardaste una clave para {PROVIDERS[provider]?.label || provider}. No se vuelve a mostrar.</> : <>No hay una clave guardada para este proveedor.</>}</div>
       <label>{configured ? 'Reemplazar API key' : 'API key'}<input type="password" value={keyInput} onChange={(e) => setKeyInput(e.target.value)} placeholder={configured ? 'Pega una clave nueva para reemplazarla' : 'Pega tu clave de API'} autoComplete="new-password" /></label>
       <div className="inline-actions"><button className="button-primary" onClick={saveKey} disabled={busy || !keyInput.trim()}>{busy ? 'Guardando…' : configured ? 'Guardar nueva clave' : 'Guardar clave'}</button>{configured && <button className="button-secondary" onClick={deleteKey} disabled={busy}>Eliminar clave</button>}</div>
       {message && <div className="auth-error" role="status">{message}</div>}

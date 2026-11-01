@@ -24,7 +24,13 @@ type PreviewRow = {
   'Ayudado %': number
   'AWA %': number
 }
-type Preview = { base: number; analyses: { name: string; rows: PreviewRow[] }[] }
+type Coverage = { question: string; role: string; answers: number; recognized: number; unrecognized: { respuesta: string; n: number }[] }
+type Preview = {
+  base: number
+  analyses: { name: string; rows: PreviewRow[]; coverage?: Coverage | null }[]
+  learned_variants?: { variante: string; marca: string; n: number }[]
+  ignored_entities?: string[]
+}
 
 function rankPreviewRows(rows: PreviewRow[]): PreviewRow[] {
   return [...rows].sort((a, b) =>
@@ -64,6 +70,9 @@ export default function AwarenessStandalone({ onNotice }: { onNotice: (n: { text
     { name: 'Análisis 1', tom: '0', esp: '0', ayu: '0' }, { name: 'Análisis 2', tom: '0', esp: '0', ayu: '0' },
   ])
   const [maxRows, setMaxRows] = useState(0)
+  const [fuzzy, setFuzzy] = useState(true)
+  const [tomFirstOnly, setTomFirstOnly] = useState(true)
+  const [suggesting, setSuggesting] = useState(false)
   const [expectedCols, setExpectedCols] = useState(0)
   const [validation, setValidation] = useState<ValidationRow[]>([])
   const [preview, setPreview] = useState<Preview | null>(null)
@@ -113,9 +122,9 @@ export default function AwarenessStandalone({ onNotice }: { onNotice: (n: { text
     try {
       const aliases = JSON.parse(aliasesText || '{}')
       const normalizations = JSON.parse(normText || '[]')
-      return { config: { entities: entitiesText.split('\n').map((l) => l.trim()).filter(Boolean), aliases, normalizations, demographics, analyses, max_rows: maxRows, expected_raw_cols: expectedCols }, error: '' }
+      return { config: { entities: entitiesText.split('\n').map((l) => l.trim()).filter(Boolean), aliases, normalizations, demographics, analyses, max_rows: maxRows, expected_raw_cols: expectedCols, fuzzy, tom_first_only: tomFirstOnly }, error: '' }
     } catch (err) { return { config: null, error: `Error en el JSON de alias o normalizaciones: ${(err as Error).message}` } }
-  }, [entitiesText, aliasesText, normText, demographics, analyses, maxRows, expectedCols])
+  }, [entitiesText, aliasesText, normText, demographics, analyses, maxRows, expectedCols, fuzzy, tomFirstOnly])
 
   useEffect(() => {
     setPreview(null)
@@ -131,6 +140,27 @@ export default function AwarenessStandalone({ onNotice }: { onNotice: (n: { text
     }, 350)
     return () => window.clearTimeout(timer)
   }, [info, parsed])
+
+  async function suggestBrands() {
+    if (!file || !parsed.config) return
+    setSuggesting(true)
+    try {
+      const form = new FormData()
+      form.append('file', file); form.append('sheet', sheet); form.append('config', JSON.stringify(parsed.config))
+      const result = await callJson<{ entities: string[]; aliases: Record<string, string[]>; counts: Record<string, number>; distinct: number }>('/api/awareness-flex/suggest', { method: 'POST', body: form })
+      setEntitiesText(result.entities.join('\n'))
+      setAliasesText(JSON.stringify(result.aliases, null, 2))
+      setMode('personalizado')
+      onNotice({ text: `Se propusieron ${result.entities.length} marcas (de ${result.distinct} respuestas distintas) agrupando las escritas parecido. Revísalas y ajusta la lista.` })
+    } catch (err) { onNotice({ text: (err as Error).message, error: true }) }
+    finally { setSuggesting(false) }
+  }
+
+  function addBrand(name: string) {
+    const current = entitiesText.split('\n').map((l) => l.trim()).filter(Boolean)
+    if (current.some((item) => item.toLowerCase() === name.toLowerCase())) return
+    setEntitiesText([...current, name].join('\n'))
+  }
 
   const hasAnalysis = analyses.some((a) => [a.tom, a.esp, a.ayu].some((v) => v.trim() !== '' && v.trim() !== '0'))
 
@@ -206,6 +236,13 @@ export default function AwarenessStandalone({ onNotice }: { onNotice: (n: { text
             <textarea className="awa-code" rows={9} value={normText} onChange={(e) => setNormText(e.target.value)} spellCheck={false} />
           </label>
         </div>
+        <div className="awa-brand-tools">
+          <button className="button-secondary" disabled={!file || !parsed.config || suggesting} onClick={suggestBrands} title="Lee las respuestas del archivo y arma la lista de marcas">
+            {suggesting ? <><LoaderCircle className="spin" size={14} /> Leyendo respuestas…</> : <>Detectar marcas desde las respuestas</>}
+          </button>
+          <label className="check-row"><input type="checkbox" checked={fuzzy} onChange={(e) => setFuzzy(e.target.checked)} /><span>Agrupar respuestas escritas parecido (p. ej. “Decatlon” = “Decathlon”)</span></label>
+          <label className="check-row"><input type="checkbox" checked={tomFirstOnly} onChange={(e) => setTomFirstOnly(e.target.checked)} /><span>TOM = solo la primera marca mencionada</span></label>
+        </div>
         {parsed.error && <div className="auth-error" role="alert">{parsed.error}</div>}
       </section>
 
@@ -258,10 +295,26 @@ export default function AwarenessStandalone({ onNotice }: { onNotice: (n: { text
               <div><div className="card-label">RESULTADO</div><h3>Vista previa de Awareness</h3><p>Porcentaje de la base que recuerda cada entidad en cada nivel.</p></div>
               <span className="base-chip">Base: <b>{preview.base.toLocaleString()}</b> respuestas</span>
             </div>
+            {(preview.learned_variants?.length || preview.ignored_entities?.length) ? <div className="awa-notes">
+              {preview.learned_variants && preview.learned_variants.length > 0 && <div><b>Respuestas agrupadas con su marca:</b> {preview.learned_variants.slice(0, 10).map((item) => `${item.variante} → ${item.marca} (${item.n})`).join(' · ')}{preview.learned_variants.length > 10 ? ` · y ${preview.learned_variants.length - 10} más` : ''}</div>}
+              {preview.ignored_entities && preview.ignored_entities.length > 0 && <div><b>No se grafican:</b> {preview.ignored_entities.join(', ')} (no son marcas).</div>}
+            </div> : null}
             <div className="awa-preview-grid">
               {preview.analyses.map((analysis) => (
                 <article className="awa-preview-analysis" key={analysis.name}>
                   <div className="awa-preview-analysis-title"><h4>{analysis.name}</h4><span>{analysis.rows.length} marcas</span></div>
+                  {analysis.coverage && analysis.coverage.answers > 0 && (() => {
+                    const cov = analysis.coverage as Coverage
+                    const share = cov.recognized / cov.answers
+                    return <div className={`awa-coverage ${share < 0.6 ? 'low' : 'ok'}`}>
+                      <b>{Math.round(share * 100)}% de las respuestas {cov.role} coincide con tu lista de marcas</b>
+                      <span>{cov.recognized.toLocaleString()} de {cov.answers.toLocaleString()} respuestas con marca en «{cov.question}».</span>
+                      {cov.unrecognized.length > 0 && <div className="awa-chips">
+                        <small>{share < 0.6 ? 'Estas respuestas frecuentes no están en tu lista (clic para agregarlas):' : 'Respuestas sin reconocer:'}</small>
+                        {cov.unrecognized.map((item) => <button key={item.respuesta} className="awa-chip" onClick={() => addBrand(item.respuesta)} title="Agregar a la lista de marcas">+ {item.respuesta} <i>{item.n}</i></button>)}
+                      </div>}
+                    </div>
+                  })()}
                   {analysis.rows.length ? <>
                     <div className="chart-wrap awa-preview-chart">
                       <ResponsiveContainer width="100%" height={Math.max(230, analysis.rows.length * 38)}>

@@ -156,7 +156,12 @@ def _api_key_for_user(db: Session, email: str, provider: str, supplied: Optional
     if user is None:
         raise HTTPException(401, "La sesión no corresponde a un usuario activo.")
     saved = db.get(UserApiKey, {"user_id": user.id, "provider": provider})
-    return decrypt_api_key(saved.encrypted_key) if saved else None
+    if not saved:
+        return None
+    try:
+        return decrypt_api_key(saved.encrypted_key)
+    except RuntimeError as exc:
+        raise HTTPException(400, "La clave guardada ya no se puede leer (cambió JWT_SECRET en el servidor). Vuelve a guardarla en Ajustes.") from exc
 
 
 @app.get("/api/me/api-keys")
@@ -165,7 +170,13 @@ def list_my_api_keys(request: Request, db: Session = Depends(get_db)):
     if user is None:
         raise HTTPException(401, "La sesión no corresponde a un usuario activo.")
     records = db.scalars(select(UserApiKey).where(UserApiKey.user_id == user.id)).all()
-    return {"providers": [record.provider for record in records]}
+    unreadable = []
+    for record in records:
+        try:
+            decrypt_api_key(record.encrypted_key)
+        except RuntimeError:
+            unreadable.append(record.provider)
+    return {"providers": [record.provider for record in records], "unreadable": unreadable}
 
 
 @app.put("/api/me/api-keys/{provider}")
@@ -391,7 +402,9 @@ def classify_question(
             categories = coding.categories_in_use(labels, [item["nombre"] for item in codeframe])
             entities, aliases, brand_mapping = [], {}, {}
         else:
-            raw = brands.extract_mentions(llm, request.question, texts, known_brands=request.known_brands)
+            raw = brands.extract_mentions(
+                llm, request.question, texts, known_brands=request.known_brands, first_only=not request.multi,
+            )
             mapping_table = brands.build_mapping(raw, threshold=88)
             brand_mapping = dict(zip(mapping_table.get("Mención", []), mapping_table.get("Marca normalizada", [])))
             labels = brands.apply_mapping(raw, brand_mapping)

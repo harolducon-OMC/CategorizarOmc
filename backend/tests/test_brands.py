@@ -84,3 +84,51 @@ class BrandClassificationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class ClosedCatalogMixedMentionTests(unittest.TestCase):
+    """Una marca fuera del catálogo es 'Otra', pero no borra las marcas del catálogo."""
+
+    class _Llm:
+        fast = "x"
+
+        def json(self, system, user, model=None, max_tokens=0):
+            import json
+            payload = json.loads(user.split("Respuestas:\n")[-1])
+            answers = {"Bancolombia y Scotiabank": ["Bancolombia", "Scotiabank"], "Scotiabank": ["Scotiabank"]}
+            return {"resultados": [{"id": p["id"], "marcas": answers[p["texto"]]} for p in payload]}
+
+    def test_out_of_catalog_is_otra_and_keeps_catalog_brand(self):
+        rows = brands.extract_mentions(
+            self._Llm(), "P1", ["Bancolombia y Scotiabank", "Scotiabank", "", "ns/nr"],
+            known_brands=["Bancolombia", "Davivienda"],
+        )
+        self.assertEqual(rows[0], ["Bancolombia", "Otra"])
+        self.assertEqual(rows[1], ["Otra"])
+        self.assertEqual(rows[2], [])           # celda vacía permanece vacía
+        self.assertEqual(rows[3], ["NS/NR"])
+
+
+class FirstMentionOnlyTests(unittest.TestCase):
+    class _Llm:
+        fast = "x"
+        seen_system = ""
+
+        def json(self, system, user, model=None, max_tokens=0):
+            import json
+            type(self).seen_system = system
+            payload = json.loads(user.split("Respuestas:\n")[-1])
+            answers = {"Puma, Nike, Adidas": ["Puma", "Nike", "Adidas"], "Adidas y Nike": ["Adidas", "Nike"]}
+            return {"resultados": [{"id": p["id"], "marcas": answers[p["texto"]]} for p in payload]}
+
+    def test_first_only_keeps_first_mention_and_marks_external_as_otra(self):
+        rows = brands.extract_mentions(
+            self._Llm(), "CE1", ["Puma, Nike, Adidas", "Adidas y Nike"],
+            known_brands=["Nike", "Adidas"], first_only=True,
+        )
+        self.assertEqual(rows, [["Otra"], ["Adidas"]])
+        self.assertIn("PRIMERA", self._Llm.seen_system)
+
+    def test_default_keeps_all_catalog_brands(self):
+        rows = brands.extract_mentions(self._Llm(), "CE1", ["Adidas y Nike"], known_brands=["Nike", "Adidas"])
+        self.assertEqual(rows, [["Adidas", "Nike"]])
