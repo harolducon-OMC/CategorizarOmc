@@ -250,6 +250,23 @@ def entity_from_aided_col(column_name: str, entities: List[str]) -> Optional[str
 # CÁLCULO DE AWARENESS Y TABLAS
 # ============================================================
 
+# TOM = primera marca mencionada. Se separa por coma, punto y coma, "/", salto de línea, " y " o " e ".
+_FIRST_MENTION_SPLIT = re.compile(r"\s*(?:[,;/|\n\r]|\s+y\s+|\s+e\s+)\s*", re.IGNORECASE)
+
+
+def first_mention(value, protected_norms=frozenset()):
+    """Devuelve solo la primera mención de una celda ("Puma, Nike, Adidas" -> "Puma").
+
+    Si la celda completa es un alias conocido (p. ej. "Johnson y Johnson") no se divide.
+    """
+    if pd.isna(value):
+        return value
+    text = str(value).strip()
+    if norm(text) in protected_norms:
+        return text
+    return _FIRST_MENTION_SPLIT.split(text, maxsplit=1)[0].strip()
+
+
 def build_analysis(df: pd.DataFrame, demo_cols: Dict, cfg: Dict, entities: List[str], aliases: Dict, normalizations: List[Dict], expected_raw_cols: int):
     tom_col = find_col(df, cfg["tom"])
     esp_cols = find_cols(df, cfg["esp"])
@@ -269,8 +286,16 @@ def build_analysis(df: pd.DataFrame, demo_cols: Dict, cfg: Dict, entities: List[
         entity = entity_from_aided_col(col, entities)
         if entity in aided_map: aided_map[entity] = col
 
+    # TOM: solo cuenta la PRIMERA marca mencionada (cfg["tom_first_only"], activo por defecto).
+    # Si la primera marca no está en el listado, nadie recibe TOM (queda como "Otra" fuera del análisis).
+    tom_values = raw_df[tom_col] if tom_col else None
+    if tom_col and cfg.get("tom_first_only", True):
+        protected = {norm(name) for name in entities}
+        protected |= {norm(alias) for values in aliases.values() for alias in values}
+        tom_values = tom_values.apply(lambda value: first_mention(value, protected))
+
     for entity in entities:
-        tom = raw_df[tom_col].apply(lambda value: contains_entity(value, entity, aliases)) if tom_col else pd.Series(False, index=df.index)
+        tom = tom_values.apply(lambda value: contains_entity(value, entity, aliases)) if tom_col else pd.Series(False, index=df.index)
         
         espontaneo = pd.Series(False, index=df.index)
         for col in esp_cols:

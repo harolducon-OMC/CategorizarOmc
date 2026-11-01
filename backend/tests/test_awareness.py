@@ -89,5 +89,30 @@ class AwarenessColumnTests(unittest.TestCase):
         self.assertEqual(len(output), 2)
 
 
+class TomFirstMentionTests(unittest.TestCase):
+    def _tom(self, answers, entities=("Nike", "Adidas"), **cfg):
+        frame = pd.DataFrame({"TOM": answers})
+        aliases = {e: [e.lower()] for e in entities}
+        config = {"name": "A", "tom": "TOM", "esp": "0", "ayu": "0", **cfg}
+        _, indicators, _ = awareness.build_analysis(
+            frame, {k: None for k in ("sexo", "edad", "departamento", "estrato", "ingreso")},
+            config, list(entities), aliases, [], 0,
+        )
+        return {e: indicators[(e, "TOM")].tolist() for e in entities}
+
+    def test_only_first_brand_counts_as_tom(self):
+        result = self._tom(["Nike, Adidas", "Adidas y Nike", "Puma, Nike, Adidas", "Nike"])
+        self.assertEqual(result["Nike"], [1, 0, 0, 1])
+        self.assertEqual(result["Adidas"], [0, 1, 0, 0])   # "Puma" primero => nadie recibe TOM
+
+    def test_alias_with_conjunction_is_not_split(self):
+        result = self._tom(["Johnson y Johnson", "Nike"], entities=("Johnson y Johnson", "Nike"))
+        self.assertEqual(result["Johnson y Johnson"], [1, 0])
+
+    def test_first_only_can_be_disabled(self):
+        result = self._tom(["Puma, Nike"], tom_first_only=False)
+        self.assertEqual(result["Nike"], [1])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
