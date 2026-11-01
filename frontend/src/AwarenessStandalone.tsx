@@ -26,6 +26,12 @@ type PreviewRow = {
 }
 type Preview = { base: number; analyses: { name: string; rows: PreviewRow[] }[] }
 
+function rankPreviewRows(rows: PreviewRow[]): PreviewRow[] {
+  return [...rows].sort((a, b) =>
+    (b['AWA %'] - a['AWA %']) || a.Entidad.localeCompare(b.Entidad, 'es')
+  )
+}
+
 const DEMO_LABELS: Record<string, string> = {
   sexo: 'Sexo', edad: 'Edad', departamento: 'Departamento / Ciudad', estrato: 'Estrato', ingreso: 'Ingreso / Rangos',
 }
@@ -135,7 +141,10 @@ export default function AwarenessStandalone({ onNotice }: { onNotice: (n: { text
       const previewForm = new FormData()
       previewForm.append('file', file); previewForm.append('sheet', sheet); previewForm.append('config', JSON.stringify(parsed.config))
       const previewData = await callJson<Preview>('/api/awareness-flex/preview', { method: 'POST', body: previewForm })
-      setPreview(previewData)
+      setPreview({
+        ...previewData,
+        analyses: previewData.analyses.map((analysis) => ({ ...analysis, rows: rankPreviewRows(analysis.rows) })),
+      })
 
       const reportForm = new FormData()
       reportForm.append('file', file); reportForm.append('sheet', sheet); reportForm.append('config', JSON.stringify(parsed.config))
@@ -259,7 +268,7 @@ export default function AwarenessStandalone({ onNotice }: { onNotice: (n: { text
                         <BarChart data={analysis.rows} layout="vertical" margin={{ top: 6, right: 18, left: 8, bottom: 4 }}>
                           <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e9edf3" />
                           <XAxis type="number" domain={[0, 1]} tickFormatter={(value) => `${Math.round(value * 100)}%`} axisLine={false} tickLine={false} tick={{ fill: '#8b94a7', fontSize: 10 }} />
-                          <YAxis type="category" dataKey="Entidad" width={126} axisLine={false} tickLine={false} tick={{ fill: '#4b566b', fontSize: 10 }} />
+                          <YAxis type="category" dataKey="Entidad" width={126} reversed axisLine={false} tickLine={false} tick={{ fill: '#4b566b', fontSize: 10 }} />
                           <Tooltip formatter={(value: any, name: any) => [`${(Number(value) * 100).toFixed(1)}%`, name]} contentStyle={{ border: '1px solid #e7eaf0', borderRadius: 9, fontSize: 11 }} />
                           <Legend wrapperStyle={{ fontSize: 10, paddingTop: 8 }} />
                           <Bar dataKey="TOM %" name="TOM" stackId="awareness" fill="#315bdb" />
