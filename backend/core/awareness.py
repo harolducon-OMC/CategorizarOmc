@@ -125,64 +125,12 @@ def apply_normalizations(value, normalizations: List[Dict]) -> str:
             pass
     return text
 
-def _edit_distance_at_most_one(left: str, right: str) -> bool:
-    """Return whether two strings differ by at most one insertion/deletion/substitution."""
-    if left == right:
-        return True
-    if abs(len(left) - len(right)) > 1:
-        return False
-
-    left_index = right_index = differences = 0
-    while left_index < len(left) and right_index < len(right):
-        if left[left_index] == right[right_index]:
-            left_index += 1
-            right_index += 1
-            continue
-        differences += 1
-        if differences > 1:
-            return False
-        if len(left) > len(right):
-            left_index += 1
-        elif len(right) > len(left):
-            right_index += 1
-        else:
-            left_index += 1
-            right_index += 1
-
-    if left_index < len(left) or right_index < len(right):
-        differences += 1
-    return differences <= 1
-
-def _contains_compact_alias(text: str, alias: str) -> bool:
-    """Match spacing variants and one-character typos in a bounded word phrase."""
-    alias_compact = alias.replace(" ", "")
-    if not alias_compact:
-        return False
-
-    words = text.split()
-    for start in range(len(words)):
-        candidate = ""
-        for end in range(start, min(len(words), start + 5)):
-            candidate += words[end]
-            if candidate == alias_compact:
-                return True
-            # Avoid fuzzy matches for short/common names where false positives are likelier.
-            if (
-                len(alias_compact) >= 8
-                and abs(len(candidate) - len(alias_compact)) <= 1
-                and _edit_distance_at_most_one(candidate, alias_compact)
-            ):
-                return True
-    return False
-
 def contains_entity(value, entity: str, aliases: Dict[str, List[str]]) -> bool:
     text = norm(value)
     if text in NEGATIVOS: return False
     for alias in aliases.get(entity, [entity]):
         alias_norm = norm(alias)
         if alias_norm and re.search(r"(^|\s)" + re.escape(alias_norm) + r"(\s|$)", text):
-            return True
-        if alias_norm and _contains_compact_alias(text, alias_norm):
             return True
     return False
 
@@ -266,17 +214,6 @@ def _is_empty_response(value) -> bool:
     except (TypeError, ValueError):
         return False
 
-def first_non_empty_response(df: pd.DataFrame, columns: List[str]) -> pd.Series:
-    """Return one response per respondent, taking the first answered split column."""
-    result = pd.Series([None] * len(df), index=df.index, dtype=object)
-    filled = pd.Series(False, index=df.index)
-    for column in columns:
-        values = df[column]
-        take = (~filled) & (~values.map(_is_empty_response))
-        result.loc[take] = values.loc[take]
-        filled = filled | take
-    return result
-
 def frame_with_categorized_responses(df: pd.DataFrame, classifications) -> pd.DataFrame:
     """Replace classified source columns with their saved, human-corrected labels."""
     output = df.copy()
@@ -314,11 +251,11 @@ def entity_from_aided_col(column_name: str, entities: List[str]) -> Optional[str
 # ============================================================
 
 def build_analysis(df: pd.DataFrame, demo_cols: Dict, cfg: Dict, entities: List[str], aliases: Dict, normalizations: List[Dict], expected_raw_cols: int):
-    tom_cols = find_cols(df, cfg["tom"])
+    tom_col = find_col(df, cfg["tom"])
     esp_cols = find_cols(df, cfg["esp"])
     ayud_cols = find_cols(df, cfg["ayu"])
 
-    raw_cols = [demo_cols.get(k) for k in ["sexo", "edad", "departamento", "estrato", "ingreso"]] + tom_cols + esp_cols + ayud_cols
+    raw_cols = [demo_cols.get(k) for k in ["sexo", "edad", "departamento", "estrato", "ingreso"]] + [tom_col] + esp_cols + ayud_cols
     raw_cols = list(dict.fromkeys(col for col in raw_cols if col is not None))
 
     if expected_raw_cols and expected_raw_cols > 0 and len(raw_cols) != expected_raw_cols:
@@ -327,30 +264,26 @@ def build_analysis(df: pd.DataFrame, demo_cols: Dict, cfg: Dict, entities: List[
     raw_df = df[raw_cols].copy()
     output_df = raw_df.copy()
     indicators = {}
-    tom_response = first_non_empty_response(raw_df, tom_cols)
-
-    aided_map = {entity: [] for entity in entities}
+    aided_map = {entity: None for entity in entities}
     for col in ayud_cols:
         entity = entity_from_aided_col(col, entities)
-        if entity in aided_map: aided_map[entity].append(col)
+        if entity in aided_map: aided_map[entity] = col
 
     for entity in entities:
-        tom = tom_response.apply(lambda value: contains_entity(value, entity, aliases)) if tom_cols else pd.Series(False, index=df.index)
+        tom = raw_df[tom_col].apply(lambda value: contains_entity(value, entity, aliases)) if tom_col else pd.Series(False, index=df.index)
         
         espontaneo = pd.Series(False, index=df.index)
         for col in esp_cols:
             espontaneo = espontaneo | raw_df[col].apply(lambda value: contains_entity(value, entity, aliases))
 
-        aided_entity_cols = aided_map.get(entity) or []
-        if aided_entity_cols:
+        aided_col = aided_map.get(entity)
+        if aided_col is not None:
             def check_aided_value(value, ent, als):
                 if pd.isna(value): return False
                 v_str = str(value).strip().lower()
-                if v_str in ["1", "si", "sí", "x", "seleccionado", "true"]: return True
+                if v_str in ["1", "si", "sí", "x", "seleccionado", "true"] or ent.lower() in v_str: return True
                 return contains_entity(value, ent, als)
-            ayudado = pd.Series(False, index=df.index)
-            for col in aided_entity_cols:
-                ayudado = ayudado | raw_df[col].apply(lambda value: check_aided_value(value, entity, aliases))
+            ayudado = raw_df[aided_col].apply(lambda value: check_aided_value(value, entity, aliases))
         else:
             ayudado = pd.Series(False, index=df.index)
             for col in ayud_cols:
@@ -367,15 +300,13 @@ def build_analysis(df: pd.DataFrame, demo_cols: Dict, cfg: Dict, entities: List[
     return output_df, pd.DataFrame(indicators), raw_cols
 
 
-def tom_frequency_table(df: pd.DataFrame, tom_col, normalizations: List[Dict]) -> pd.DataFrame:
+def tom_frequency_table(df: pd.DataFrame, tom_col: str, normalizations: List[Dict]) -> pd.DataFrame:
     if not tom_col:
         return pd.DataFrame()
-    tom_cols = [tom_col] if isinstance(tom_col, str) else list(tom_col)
-    tom_response = first_non_empty_response(df, tom_cols)
     
     all_mentions = []
     
-    for row_value in tom_response.dropna():
+    for row_value in df[tom_col].dropna():
         val_str = str(row_value).strip()
         if val_str.lower() in NEGATIVOS or val_str == "":
             all_mentions.append("Ninguno / NS-NR")
@@ -507,9 +438,9 @@ def build_excel_bytes(df, demo_cols, cfg1, cfg2, entities, aliases, normalizatio
             write_sections_sheet(wb, f"Resumen {cfg['name']}", awareness_sections(indicators, df, demo_cols, cfg['name'], entities))
             write_sections_sheet(wb, f"Deptos {cfg['name']}", department_sections(indicators, df, demo_cols, entities))
             
-            tom_col_names = find_cols(df, cfg["tom"])
-            if tom_col_names:
-                freq_table = tom_frequency_table(df, tom_col_names, normalizations)
+            tom_col_name = find_col(df, cfg["tom"])
+            if tom_col_name:
+                freq_table = tom_frequency_table(df, tom_col_name, normalizations)
                 write_sections_sheet(wb, f"Frecuencias P1 {cfg['name']}", [("Distribución de Respuestas P1 (TOM)", freq_table)])
 
     output = io.BytesIO()

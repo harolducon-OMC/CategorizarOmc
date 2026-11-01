@@ -4,13 +4,12 @@ from core import awareness
 
 
 class AwarenessColumnTests(unittest.TestCase):
-    def test_brand_matching_accepts_spacing_variants_and_one_character_typos(self):
-        self.assertTrue(awareness.contains_entity("  Sportfitness  ", "Sport fitness", {}))
-        self.assertTrue(awareness.contains_entity("Decatlon", "Decathlon", {}))
-
-    def test_brand_matching_does_not_match_unrelated_longer_words(self):
-        self.assertFalse(awareness.contains_entity("Decathlonics", "Decathlon", {}))
-        self.assertFalse(awareness.contains_entity("Sportiva", "Sport fitness", {}))
+    def test_brand_matching_trims_whitespace_and_uses_explicit_aliases(self):
+        self.assertTrue(awareness.contains_entity(
+            "  Sportfitness  ", "Sport fitness",
+            {"Sport fitness": ["Sportfitness"]},
+        ))
+        self.assertFalse(awareness.contains_entity("Decatlon", "Decathlon", {}))
 
     def test_exact_columns_win_over_partial_prefix_matches(self):
         frame = pd.DataFrame({"P1": ["Alfa"], "P10": ["Beta"], "P1 texto": ["Gamma"]})
@@ -21,7 +20,7 @@ class AwarenessColumnTests(unittest.TestCase):
         frame = pd.DataFrame(columns=["A1_2", "A10", "A1", "A1_1", "A12"])
         self.assertEqual(awareness.find_cols(frame, "A1"), ["A1", "A1_1", "A1_2"])
 
-    def test_split_tom_uses_first_nonempty_response_per_person(self):
+    def test_tom_uses_the_single_column_selected_by_the_reference_logic(self):
         frame = pd.DataFrame({
             "CE1": ["Alfa", "", None, "0"],
             "CE1_1": ["Beta", "Beta", "", "Alfa"],
@@ -33,28 +32,41 @@ class AwarenessColumnTests(unittest.TestCase):
             {"name": "TOM", "tom": "CE1", "esp": "0", "ayu": "0"},
             ["Alfa", "Beta"], {"Alfa": ["alfa"], "Beta": ["beta"]}, [], 0,
         )
+        self.assertIn("CE1", raw_columns)
+        self.assertNotIn("CE1_1", raw_columns)
+        self.assertNotIn("CE1_2", raw_columns)
         self.assertNotIn("CE10", raw_columns)
-        self.assertEqual(indicators[("Alfa", "TOM")].tolist(), [1, 0, 1, 0])
-        self.assertEqual(indicators[("Beta", "TOM")].tolist(), [0, 1, 0, 1])
+        self.assertEqual(indicators[("Alfa", "TOM")].tolist(), [1, 0, 0, 0])
+        self.assertEqual(indicators[("Beta", "TOM")].tolist(), [0, 0, 0, 0])
 
-    def test_spontaneous_and_aided_split_columns_are_grouped_without_double_counting(self):
+    def test_spontaneous_groups_delimited_splits_without_neighboring_codes(self):
         frame = pd.DataFrame({
             "E1": ["Alfa", "", ""],
             "E1_1": ["Alfa", "Alfa", ""],
             "E10": ["Alfa", "", "Alfa"],
-            "H1 Alfa": ["1", "", ""],
-            "H1_1 Alfa": ["1", "1", "1"],
-            "H10 Alfa": ["1", "", "1"],
         })
         _, indicators, raw_columns = awareness.build_analysis(
             frame, {},
-            {"name": "AWA", "tom": "0", "esp": "E1", "ayu": "H1"},
+            {"name": "AWA", "tom": "0", "esp": "E1", "ayu": "0"},
             ["Alfa"], {"Alfa": ["alfa"]}, [], 0,
         )
         self.assertNotIn("E10", raw_columns)
-        self.assertNotIn("H10 Alfa", raw_columns)
         self.assertEqual(indicators[("Alfa", "Espontaneo")].tolist(), [1, 1, 0])
-        self.assertEqual(indicators[("Alfa", "Ayudado")].tolist(), [0, 0, 1])
+        self.assertEqual(indicators[("Alfa", "Ayudado")].tolist(), [0, 0, 0])
+
+    def test_aided_uses_last_entity_column_assigned_by_reference_logic(self):
+        frame = pd.DataFrame({
+            "H1 Alfa": ["1", "1"],
+            "H1_1 Alfa": ["", "1"],
+            "H10 Alfa": ["1", ""],
+        })
+        _, indicators, raw_columns = awareness.build_analysis(
+            frame, {},
+            {"name": "AWA", "tom": "0", "esp": "0", "ayu": "H1"},
+            ["Alfa"], {"Alfa": ["alfa"]}, [], 0,
+        )
+        self.assertNotIn("H10 Alfa", raw_columns)
+        self.assertEqual(indicators[("Alfa", "Ayudado")].tolist(), [0, 1])
 
     def test_categorized_labels_replace_raw_response_but_keep_empty_rows_blank(self):
         frame = pd.DataFrame({"C1": ["Alias antiguo", "", "Otra respuesta"]})
