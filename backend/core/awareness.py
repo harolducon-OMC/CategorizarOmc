@@ -125,12 +125,64 @@ def apply_normalizations(value, normalizations: List[Dict]) -> str:
             pass
     return text
 
+def _edit_distance_at_most_one(left: str, right: str) -> bool:
+    """Return whether two strings differ by at most one insertion/deletion/substitution."""
+    if left == right:
+        return True
+    if abs(len(left) - len(right)) > 1:
+        return False
+
+    left_index = right_index = differences = 0
+    while left_index < len(left) and right_index < len(right):
+        if left[left_index] == right[right_index]:
+            left_index += 1
+            right_index += 1
+            continue
+        differences += 1
+        if differences > 1:
+            return False
+        if len(left) > len(right):
+            left_index += 1
+        elif len(right) > len(left):
+            right_index += 1
+        else:
+            left_index += 1
+            right_index += 1
+
+    if left_index < len(left) or right_index < len(right):
+        differences += 1
+    return differences <= 1
+
+def _contains_compact_alias(text: str, alias: str) -> bool:
+    """Match spacing variants and one-character typos in a bounded word phrase."""
+    alias_compact = alias.replace(" ", "")
+    if not alias_compact:
+        return False
+
+    words = text.split()
+    for start in range(len(words)):
+        candidate = ""
+        for end in range(start, min(len(words), start + 5)):
+            candidate += words[end]
+            if candidate == alias_compact:
+                return True
+            # Avoid fuzzy matches for short/common names where false positives are likelier.
+            if (
+                len(alias_compact) >= 8
+                and abs(len(candidate) - len(alias_compact)) <= 1
+                and _edit_distance_at_most_one(candidate, alias_compact)
+            ):
+                return True
+    return False
+
 def contains_entity(value, entity: str, aliases: Dict[str, List[str]]) -> bool:
     text = norm(value)
     if text in NEGATIVOS: return False
     for alias in aliases.get(entity, [entity]):
         alias_norm = norm(alias)
         if alias_norm and re.search(r"(^|\s)" + re.escape(alias_norm) + r"(\s|$)", text):
+            return True
+        if alias_norm and _contains_compact_alias(text, alias_norm):
             return True
     return False
 

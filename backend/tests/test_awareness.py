@@ -4,6 +4,14 @@ from core import awareness
 
 
 class AwarenessColumnTests(unittest.TestCase):
+    def test_brand_matching_accepts_spacing_variants_and_one_character_typos(self):
+        self.assertTrue(awareness.contains_entity("  Sportfitness  ", "Sport fitness", {}))
+        self.assertTrue(awareness.contains_entity("Decatlon", "Decathlon", {}))
+
+    def test_brand_matching_does_not_match_unrelated_longer_words(self):
+        self.assertFalse(awareness.contains_entity("Decathlonics", "Decathlon", {}))
+        self.assertFalse(awareness.contains_entity("Sportiva", "Sport fitness", {}))
+
     def test_exact_columns_win_over_partial_prefix_matches(self):
         frame = pd.DataFrame({"P1": ["Alfa"], "P10": ["Beta"], "P1 texto": ["Gamma"]})
         self.assertEqual(awareness.find_col(frame, "P1"), "P1")
