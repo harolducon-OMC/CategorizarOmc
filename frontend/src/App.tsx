@@ -14,7 +14,7 @@ import AwarenessStandalone from './AwarenessStandalone'
 import FlowGuide from './FlowGuide'
 import SegmentExplorer from './SegmentExplorer'
 import HelpAssistant from './HelpAssistant'
-import { downloadChartPngById, downloadCsv } from './downloads'
+import { downloadAwarenessChartImage, downloadAwarenessTableImage, toAwarenessImageRows } from './downloads'
 import './AwarenessExtras.css'
 
 type Page = 'home' | 'categorize' | 'dashboard' | 'awareness' | 'settings'
@@ -529,7 +529,6 @@ function AwarenessPage({ study, onNotice }: any) {
   const [validationError, setValidationError] = useState('')
   const [result, setResult] = useState<any>(null)
   const [busy, setBusy] = useState(false)
-  const [visibleInsights, setVisibleInsights] = useState<Record<string, boolean>>({})
   const brandClass = brandClasses.find((item) => item.id === classIds[0]) || brandClasses[0]
   const studyColumns = study?.columns || []
   const studyColumnsKey = studyColumns.join('\u0000')
@@ -596,7 +595,6 @@ function AwarenessPage({ study, onNotice }: any) {
     if (!study || !brandClass || !classIds.length || !analysesReady) return
     setBusy(true)
     try {
-      setVisibleInsights({})
       setResult(await api<any>(`/api/studies/${study.id}/awareness`, {
         method: 'POST', body: JSON.stringify({
           classification_id: classIds[0],
@@ -691,39 +689,16 @@ function AwarenessPage({ study, onNotice }: any) {
             (Number(b['AWA %']) - Number(a['AWA %'])) || String(a.Entidad).localeCompare(String(b.Entidad), 'es')
           )
           const chartRows = rankedRows.map((r: any) => ({ name: r.Entidad, tom: r['TOM %'], espontaneo: r['Espontaneo %'], ayudado: r['Ayudado %'] }))
-          const insightKey = `${analysis.name}-${analysisIndex}`
-          const tomInsight = analysis.tom_insights
-          const csvRows = rankedRows.map((row: any) => ({
-            Marca: row.Entidad,
-            'TOM menciones': row.TOM,
-            'TOM %': (Number(row['TOM %']) * 100).toFixed(1),
-            'Espontáneo menciones': row.Espontaneo,
-            'Espontáneo %': (Number(row['Espontaneo %']) * 100).toFixed(1),
-            'Ayudado menciones': row.Ayudado,
-            'Ayudado %': (Number(row['Ayudado %']) * 100).toFixed(1),
-            'AWA menciones': row.AWA,
-            'AWA %': (Number(row['AWA %']) * 100).toFixed(1),
-          }))
+          const imageRows = toAwarenessImageRows(rankedRows)
           const filePart = String(analysis.name || 'awareness').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 50) || 'awareness'
           return <div className="awareness-analysis-result" key={analysis.name}>
             <div className="awa-result-toolbar">
               <h4>{analysis.name}</h4>
               <div className="awa-export-actions">
-                <button className="button-secondary" disabled={!chartRows.length} onClick={() => downloadChartPngById(`integrated-awareness-chart-${analysisIndex}`, `${filePart}_grafico.png`).catch((err) => onNotice({ text: (err as Error).message, error: true }))}><BarChart3 size={14} /> Descargar gráfico</button>
-                <button className="button-secondary" disabled={!csvRows.length} onClick={() => downloadCsv(`${filePart}_tabla.csv`, ['Marca', 'TOM menciones', 'TOM %', 'Espontáneo menciones', 'Espontáneo %', 'Ayudado menciones', 'Ayudado %', 'AWA menciones', 'AWA %'], csvRows)}><ArrowDownToLine size={14} /> Descargar tabla</button>
-                <button className="button-secondary" disabled={!tomInsight} onClick={() => setVisibleInsights((current) => ({ ...current, [insightKey]: !current[insightKey] }))}><Sparkles size={14} /> {visibleInsights[insightKey] ? 'Ocultar insight' : 'Generar insight TOM'}</button>
+                <button className="button-secondary" disabled={!imageRows.length} onClick={() => downloadAwarenessChartImage(imageRows, { title: `Awareness · ${analysis.name}`, subtitle: `Base: ${Number(result?.base || 0).toLocaleString('es-CO')} encuestados`, filename: `${filePart}_grafico.png` }).catch((err) => onNotice({ text: (err as Error).message, error: true }))}><BarChart3 size={14} /> Descargar gráfico</button>
+                <button className="button-secondary" disabled={!imageRows.length} onClick={() => downloadAwarenessTableImage(imageRows, { title: `Awareness · ${analysis.name}`, subtitle: `Base: ${Number(result?.base || 0).toLocaleString('es-CO')} encuestados`, filename: `${filePart}_tabla.png` }).catch((err) => onNotice({ text: (err as Error).message, error: true }))}><ArrowDownToLine size={14} /> Descargar tabla</button>
               </div>
             </div>
-            {visibleInsights[insightKey] && tomInsight && <div className="awa-tom-insight">
-              <b>Lectura de recordación · {analysis.name}</b>
-              {tomInsight.marca_evaluada_lider
-                ? <p>Entre las marcas evaluadas, <strong>{tomInsight.marca_evaluada_lider.marca}</strong> lidera TOM con {Number(tomInsight.marca_evaluada_lider.menciones).toLocaleString()} menciones ({(Number(tomInsight.marca_evaluada_lider.porcentaje) * 100).toFixed(1)}% de la base).</p>
-                : <p>No hubo menciones TOM positivas para las marcas evaluadas.</p>}
-              {tomInsight.marca_fuera_del_catalogo_lider
-                ? <p>Fuera de la lista evaluada, la mención con mayor frecuencia fue <strong>{tomInsight.marca_fuera_del_catalogo_lider.marca}</strong>, con {Number(tomInsight.marca_fuera_del_catalogo_lider.menciones).toLocaleString()} menciones ({(Number(tomInsight.marca_fuera_del_catalogo_lider.porcentaje) * 100).toFixed(1)}% de la base).</p>
-                : <p>No se encontraron menciones TOM fuera de la lista evaluada.</p>}
-              <small>Base: {Number(tomInsight.base).toLocaleString()} respuestas; {Number(tomInsight.respuestas_tom).toLocaleString()} con respuesta TOM. Las menciones externas son candidatas agrupadas automáticamente: revísalas antes de agregarlas al catálogo.</small>
-            </div>}
             <div id={`integrated-awareness-chart-${analysisIndex}`} className="chart-wrap"><ResponsiveContainer width="100%" height={Math.max(260, chartRows.length * 40)}><BarChart data={chartRows} layout="vertical" margin={{ left: 18, right: 26 }}><CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e9edf3" /><XAxis type="number" tickFormatter={(v) => `${Math.round(v * 100)}%`} axisLine={false} tickLine={false} /><YAxis type="category" dataKey="name" width={130} reversed axisLine={false} tickLine={false} /><Tooltip formatter={(v: any) => `${(Number(v) * 100).toFixed(1)}%`} /><Bar dataKey="tom" name="TOM" stackId="a" fill="#315bdb" /><Bar dataKey="espontaneo" name="Espontáneo" stackId="a" fill="#18a994" /><Bar dataKey="ayudado" name="Ayudado" stackId="a" fill="#ef9b46" /></BarChart></ResponsiveContainer></div>
             <div className="table-scroll"><table><thead><tr><th>Marca</th><th>TOM</th><th>Espontáneo</th><th>Ayudado</th><th>AWA</th></tr></thead><tbody>{rankedRows.map((r: any) => <tr key={r.Entidad}><td>{r.Entidad}</td><td>{(r['TOM %'] * 100).toFixed(1)}%</td><td>{(r['Espontaneo %'] * 100).toFixed(1)}%</td><td>{(r['Ayudado %'] * 100).toFixed(1)}%</td><td><b>{(r['AWA %'] * 100).toFixed(1)}%</b></td></tr>)}</tbody></table></div>
           </div>

@@ -310,110 +310,6 @@ def _coverage(frame: pd.DataFrame, cfg: Dict[str, Any], indicators: pd.DataFrame
     }
 
 
-def build_tom_insights(
-    frame: pd.DataFrame,
-    cfg: Dict[str, Any],
-    entities: List[str],
-    aliases: Dict[str, List[str]],
-    normalizations: List[Dict],
-    selected_rows: List[Dict[str, Any]],
-    fuzzy: bool = True,
-) -> Optional[Dict[str, Any]]:
-    """Compara la marca TOM líder del catálogo con menciones que quedaron fuera."""
-    tom_col = awareness.find_col(frame, cfg.get("tom", ""))
-    if not tom_col:
-        return None
-
-    ranked_selected = sorted(
-        (
-            row for row in selected_rows
-            if int(row.get("TOM", 0) or 0) > 0
-        ),
-        key=lambda row: (-int(row.get("TOM", 0) or 0), str(row.get("Entidad", "")).casefold()),
-    )
-    selected_top = None
-    if ranked_selected:
-        row = ranked_selected[0]
-        selected_top = {
-            "marca": str(row.get("Entidad", "")),
-            "menciones": int(row.get("TOM", 0) or 0),
-            "porcentaje": float(row.get("TOM %", 0) or 0),
-        }
-
-    protected = {
-        awareness.norm(name)
-        for name in entities
-    }
-    protected.update(
-        awareness.norm(alias)
-        for values in aliases.values()
-        for alias in (values or [])
-    )
-    reserved = (
-        set(awareness.NEGATIVOS)
-        | set(brands._BRAND_NSNRS)
-        | set(brands._BRAND_NONE)
-        | RESERVED_ENTITIES
-    )
-    raw_mentions: List[str] = []
-    answered = 0
-    first_only = bool(cfg.get("tom_first_only", True))
-
-    for value in frame[tom_col].tolist():
-        pieces = _pieces(value)
-        if not pieces:
-            continue
-        if first_only:
-            first = awareness.first_mention(value, protected)
-            pieces = _pieces(first)[:1]
-        valid_pieces = [piece for piece in pieces if awareness.norm(piece) not in reserved]
-        if not valid_pieces:
-            continue
-        answered += 1
-        for piece in valid_pieces:
-            normalized = awareness.apply_normalizations(piece, normalizations)
-            if pd.isna(normalized):
-                continue
-            normalized = str(normalized).strip()
-            if not normalized or awareness.norm(normalized) in reserved:
-                continue
-            is_selected = any(
-                awareness.contains_entity(normalized, entity, aliases)
-                for entity in entities
-            )
-            if not is_selected:
-                raw_mentions.append(normalized)
-
-    mention_counts: Counter = Counter()
-    spellings: Dict[str, Counter] = {}
-    if raw_mentions and fuzzy:
-        mapping = brands.build_mapping([[item] for item in raw_mentions], threshold=FUZZY_THRESHOLD)
-        for record in mapping.to_dict(orient="records"):
-            canonical = str(record["Marca normalizada"])
-            mention_counts[canonical] += int(record["Menciones"])
-    elif raw_mentions:
-        for mention in raw_mentions:
-            key = awareness.norm(mention)
-            spellings.setdefault(key, Counter())[mention] += 1
-        for key, variants in spellings.items():
-            mention_counts[variants.most_common(1)[0][0]] += sum(variants.values())
-
-    base = int(len(frame))
-    outside_rows = [
-        {"marca": name, "menciones": int(count), "porcentaje": count / base if base else 0.0}
-        for name, count in mention_counts.most_common(10)
-    ]
-    return {
-        "pregunta_tom": str(tom_col),
-        "base": base,
-        "respuestas_tom": int(answered),
-        "primera_mencion": first_only,
-        "marca_evaluada_lider": selected_top,
-        "marca_fuera_del_catalogo_lider": outside_rows[0] if outside_rows else None,
-        "marcas_fuera_del_catalogo": outside_rows,
-    }
-
-
 def generate_report(frame: pd.DataFrame, config: Dict[str, Any]) -> bytes:
     """Excel final idéntico al de la app Streamlit original (con variantes parecidas agrupadas)."""
     frame, config, _ = _prepare(frame, config)
@@ -449,15 +345,7 @@ def preview_results(frame: pd.DataFrame, config: Dict[str, Any]) -> Dict[str, An
                 "Ayudado": int(record["Ayudado"]), "Ayudado %": float(record["Ayudado %"]),
                 "AWA": int(record["AWA"]), "AWA %": float(record["AWA %"]),
             })
-        analyses.append({
-            "name": cfg["name"],
-            "rows": rows,
-            "coverage": _coverage(frame, cfg, indicators, config["entities"]),
-            "tom_insights": build_tom_insights(
-                frame, cfg, config["entities"], config["aliases"], config["normalizations"],
-                rows, fuzzy=config.get("fuzzy", True),
-            ),
-        })
+        analyses.append({"name": cfg["name"], "rows": rows, "coverage": _coverage(frame, cfg, indicators, config["entities"])})
 
     return {
         "base": int(len(frame)), "analyses": analyses,

@@ -3,7 +3,7 @@ import { ArrowDownToLine, BarChart3, Check, FileSpreadsheet, LoaderCircle, Uploa
 import {
   Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
-import { downloadChartPngById, downloadCsv } from './downloads'
+import { downloadAwarenessChartImage, downloadAwarenessTableImage, toAwarenessImageRows } from './downloads'
 
 /**
  * Awareness INDEPENDIENTE: carga un CSV/XLSX propio y descarga el Excel de resultados.
@@ -30,19 +30,9 @@ type PreviewRow = {
   'AWA %': number
 }
 type Coverage = { question: string; role: string; answers: number; recognized: number; unrecognized: { respuesta: string; n: number }[] }
-type TomLeader = { marca: string; menciones: number; porcentaje: number } | null
-type TomInsights = {
-  pregunta_tom: string
-  base: number
-  respuestas_tom: number
-  primera_mencion: boolean
-  marca_evaluada_lider: TomLeader
-  marca_fuera_del_catalogo_lider: TomLeader
-  marcas_fuera_del_catalogo: { marca: string; menciones: number; porcentaje: number }[]
-}
 type Preview = {
   base: number
-  analyses: { name: string; rows: PreviewRow[]; coverage?: Coverage | null; tom_insights?: TomInsights | null }[]
+  analyses: { name: string; rows: PreviewRow[]; coverage?: Coverage | null }[]
   learned_variants?: { variante: string; marca: string; n: number }[]
   ignored_entities?: string[]
 }
@@ -94,7 +84,6 @@ export default function AwarenessStandalone({ onNotice }: { onNotice: (n: { text
   const [reading, setReading] = useState(false)
   const [busy, setBusy] = useState(false)
   const [done, setDone] = useState(false)
-  const [visibleInsights, setVisibleInsights] = useState<Record<string, boolean>>({})
   const inputRef = useRef<HTMLInputElement>(null)
 
   function applyPreset(key: string, source: Record<string, Preset> = presets) {
@@ -145,7 +134,6 @@ export default function AwarenessStandalone({ onNotice }: { onNotice: (n: { text
   useEffect(() => {
     setPreview(null)
     setDone(false)
-    setVisibleInsights({})
   }, [file, sheet, parsed])
 
   useEffect(() => {
@@ -183,7 +171,7 @@ export default function AwarenessStandalone({ onNotice }: { onNotice: (n: { text
 
   async function generate() {
     if (!file || !parsed.config) return
-    setBusy(true); setDone(false); setPreview(null); setVisibleInsights({})
+    setBusy(true); setDone(false); setPreview(null)
     try {
       const previewForm = new FormData()
       previewForm.append('file', file); previewForm.append('sheet', sheet); previewForm.append('config', JSON.stringify(parsed.config))
@@ -318,19 +306,7 @@ export default function AwarenessStandalone({ onNotice }: { onNotice: (n: { text
             </div> : null}
             <div className="awa-preview-grid">
               {preview.analyses.map((analysis, analysisIndex) => {
-                const insightKey = `${analysis.name}-${analysisIndex}`
-                const tomInsight = analysis.tom_insights
-                const csvRows = analysis.rows.map((row) => ({
-                  Marca: row.Entidad,
-                  'TOM menciones': row.TOM,
-                  'TOM %': (row['TOM %'] * 100).toFixed(1),
-                  'Espontáneo menciones': row.Espontaneo,
-                  'Espontáneo %': (row['Espontaneo %'] * 100).toFixed(1),
-                  'Ayudado menciones': row.Ayudado,
-                  'Ayudado %': (row['Ayudado %'] * 100).toFixed(1),
-                  'AWA menciones': row.AWA,
-                  'AWA %': (row['AWA %'] * 100).toFixed(1),
-                }))
+                const imageRows = toAwarenessImageRows(analysis.rows)
                 const filePart = analysis.name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 50) || 'awareness'
                 return (
                 <article className="awa-preview-analysis" key={analysis.name}>
@@ -338,20 +314,9 @@ export default function AwarenessStandalone({ onNotice }: { onNotice: (n: { text
                     <h4>{analysis.name}</h4><span>{analysis.rows.length} marcas</span>
                   </div>
                   <div className="awa-export-actions">
-                    <button className="button-secondary" disabled={!analysis.rows.length} onClick={() => downloadChartPngById(`standalone-awareness-chart-${analysisIndex}`, `${filePart}_grafico.png`).catch((err) => onNotice({ text: (err as Error).message, error: true }))}><BarChart3 size={14} /> Descargar gráfico</button>
-                    <button className="button-secondary" disabled={!csvRows.length} onClick={() => downloadCsv(`${filePart}_tabla.csv`, ['Marca', 'TOM menciones', 'TOM %', 'Espontáneo menciones', 'Espontáneo %', 'Ayudado menciones', 'Ayudado %', 'AWA menciones', 'AWA %'], csvRows)}><ArrowDownToLine size={14} /> Descargar tabla</button>
-                    <button className="button-secondary" disabled={!tomInsight} onClick={() => setVisibleInsights((current) => ({ ...current, [insightKey]: !current[insightKey] }))}><BarChart3 size={14} /> {visibleInsights[insightKey] ? 'Ocultar insight' : 'Generar insight TOM'}</button>
+                    <button className="button-secondary" disabled={!imageRows.length} onClick={() => downloadAwarenessChartImage(imageRows, { title: `Awareness · ${analysis.name}`, subtitle: `Base: ${Number(preview.base || 0).toLocaleString('es-CO')} encuestados`, filename: `${filePart}_grafico.png` }).catch((err) => onNotice({ text: (err as Error).message, error: true }))}><BarChart3 size={14} /> Descargar gráfico</button>
+                    <button className="button-secondary" disabled={!imageRows.length} onClick={() => downloadAwarenessTableImage(imageRows, { title: `Awareness · ${analysis.name}`, subtitle: `Base: ${Number(preview.base || 0).toLocaleString('es-CO')} encuestados`, filename: `${filePart}_tabla.png` }).catch((err) => onNotice({ text: (err as Error).message, error: true }))}><ArrowDownToLine size={14} /> Descargar tabla</button>
                   </div>
-                  {visibleInsights[insightKey] && tomInsight && <div className="awa-tom-insight">
-                    <b>Lectura de recordación · {analysis.name}</b>
-                    {tomInsight.marca_evaluada_lider
-                      ? <p>Entre las marcas evaluadas, <strong>{tomInsight.marca_evaluada_lider.marca}</strong> lidera TOM con {tomInsight.marca_evaluada_lider.menciones.toLocaleString()} menciones ({(tomInsight.marca_evaluada_lider.porcentaje * 100).toFixed(1)}% de la base).</p>
-                      : <p>No hubo menciones TOM positivas para las marcas evaluadas.</p>}
-                    {tomInsight.marca_fuera_del_catalogo_lider
-                      ? <p>Fuera de la lista evaluada, la mención con mayor frecuencia fue <strong>{tomInsight.marca_fuera_del_catalogo_lider.marca}</strong>, con {tomInsight.marca_fuera_del_catalogo_lider.menciones.toLocaleString()} menciones ({(tomInsight.marca_fuera_del_catalogo_lider.porcentaje * 100).toFixed(1)}% de la base).</p>
-                      : <p>No se encontraron menciones TOM fuera de la lista evaluada.</p>}
-                    <small>Base: {tomInsight.base.toLocaleString()} respuestas; {tomInsight.respuestas_tom.toLocaleString()} con respuesta TOM. Las menciones externas son candidatas agrupadas automáticamente: revísalas antes de agregarlas al catálogo.</small>
-                  </div>}
                   {analysis.coverage && analysis.coverage.answers > 0 && (() => {
                     const cov = analysis.coverage as Coverage
                     const share = cov.recognized / cov.answers

@@ -113,14 +113,6 @@ def answer_without_model(messages):
             "estímulo o lista. La configuración del Awareness indica qué columnas alimentan cada medida."
         )
 
-    if "insight" in question and "awareness" in question:
-        return (
-            "Después de calcular Awareness, pulsa «Generar insight TOM». Compara la marca con más TOM entre las "
-            "evaluadas con la mención más frecuente fuera de la lista, usando el texto original de la pregunta TOM. "
-            "Las menciones externas se agrupan por variantes parecidas y son candidatas para revisión, no una "
-            "clasificación automática confirmada."
-        )
-
     if "insight" in question or "dashboard" in question:
         return (
             "En Dashboard eliges una pregunta ya categorizada para ver sus frecuencias y cruces por segmento. "
