@@ -4,6 +4,7 @@ import pandas as pd
 from fastapi import HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from .auth_models import User
 from .models import Respondent, Study
 from core.llm import LLM, PROVIDER_CONFIG
 
@@ -64,10 +65,13 @@ def excel_sheets(raw: bytes, filename: str) -> list[str]:
         raise HTTPException(400, f"No se pudieron leer las hojas del Excel: {exc}") from exc
 
 
-def create_study(db: Session, raw: bytes, filename: str, name: str | None, sheet: str | None) -> Study:
+def create_study(
+    db: Session, raw: bytes, filename: str, name: str | None, sheet: str | None, owner_id: str
+) -> Study:
     frame = _read_dataframe(raw, filename, sheet)
     study = Study(
         id=__import__("uuid").uuid4().hex,
+        owner_id=owner_id,
         name=(name or filename.rsplit(".", 1)[0]).strip()[:240] or filename,
         source_filename=filename[:255],
         columns=list(frame.columns),
@@ -93,11 +97,20 @@ def dataframe_for_study(db: Session, study: Study) -> pd.DataFrame:
     return pd.DataFrame([row.data for row in rows], columns=study.columns)
 
 
-def get_study(db: Session, study_id: str) -> Study:
-    study = db.get(Study, study_id)
+def get_study(db: Session, study_id: str, owner_id: str) -> Study:
+    study = db.scalar(
+        select(Study).where(Study.id == study_id, Study.owner_id == owner_id)
+    )
     if study is None:
         raise HTTPException(404, "No se encontró el estudio.")
     return study
+
+
+def get_user_id(db: Session, email: str) -> str:
+    user = db.scalar(select(User).where(User.email == email.strip().lower()))
+    if user is None:
+        raise HTTPException(401, "La sesión no corresponde a un usuario activo.")
+    return user.id
 
 
 def create_llm(provider: str, model: str, api_key: str | None) -> LLM:

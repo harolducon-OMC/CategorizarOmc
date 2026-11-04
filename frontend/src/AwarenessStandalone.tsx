@@ -3,6 +3,7 @@ import { ArrowDownToLine, BarChart3, Check, FileSpreadsheet, LoaderCircle, Uploa
 import {
   Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
+import { downloadChartPngById, downloadCsv } from './downloads'
 
 /**
  * Awareness INDEPENDIENTE: carga un CSV/XLSX propio y descarga el Excel de resultados.
@@ -19,15 +20,29 @@ type Inspect = { filename: string; sheets: string[]; columns: string[]; row_coun
 type ValidationRow = { tipo: string; campo: string; columnas: string }
 type PreviewRow = {
   Entidad: string
+  TOM: number
   'TOM %': number
+  Espontaneo: number
   'Espontaneo %': number
+  Ayudado: number
   'Ayudado %': number
+  AWA: number
   'AWA %': number
 }
 type Coverage = { question: string; role: string; answers: number; recognized: number; unrecognized: { respuesta: string; n: number }[] }
+type TomLeader = { marca: string; menciones: number; porcentaje: number } | null
+type TomInsights = {
+  pregunta_tom: string
+  base: number
+  respuestas_tom: number
+  primera_mencion: boolean
+  marca_evaluada_lider: TomLeader
+  marca_fuera_del_catalogo_lider: TomLeader
+  marcas_fuera_del_catalogo: { marca: string; menciones: number; porcentaje: number }[]
+}
 type Preview = {
   base: number
-  analyses: { name: string; rows: PreviewRow[]; coverage?: Coverage | null }[]
+  analyses: { name: string; rows: PreviewRow[]; coverage?: Coverage | null; tom_insights?: TomInsights | null }[]
   learned_variants?: { variante: string; marca: string; n: number }[]
   ignored_entities?: string[]
 }
@@ -79,6 +94,7 @@ export default function AwarenessStandalone({ onNotice }: { onNotice: (n: { text
   const [reading, setReading] = useState(false)
   const [busy, setBusy] = useState(false)
   const [done, setDone] = useState(false)
+  const [visibleInsights, setVisibleInsights] = useState<Record<string, boolean>>({})
   const inputRef = useRef<HTMLInputElement>(null)
 
   function applyPreset(key: string, source: Record<string, Preset> = presets) {
@@ -129,6 +145,7 @@ export default function AwarenessStandalone({ onNotice }: { onNotice: (n: { text
   useEffect(() => {
     setPreview(null)
     setDone(false)
+    setVisibleInsights({})
   }, [file, sheet, parsed])
 
   useEffect(() => {
@@ -166,7 +183,7 @@ export default function AwarenessStandalone({ onNotice }: { onNotice: (n: { text
 
   async function generate() {
     if (!file || !parsed.config) return
-    setBusy(true); setDone(false); setPreview(null)
+    setBusy(true); setDone(false); setPreview(null); setVisibleInsights({})
     try {
       const previewForm = new FormData()
       previewForm.append('file', file); previewForm.append('sheet', sheet); previewForm.append('config', JSON.stringify(parsed.config))
@@ -184,7 +201,7 @@ export default function AwarenessStandalone({ onNotice }: { onNotice: (n: { text
       const anchor = document.createElement('a')
       anchor.href = url; anchor.download = 'Reporte_Awareness_Estructural.xlsx'
       document.body.appendChild(anchor); anchor.click(); anchor.remove()
-      URL.revokeObjectURL(url)
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
       setDone(true)
       onNotice({ text: 'Reporte de Awareness generado y descargado.' })
     } catch (err) { onNotice({ text: (err as Error).message, error: true }) }
@@ -300,9 +317,41 @@ export default function AwarenessStandalone({ onNotice }: { onNotice: (n: { text
               {preview.ignored_entities && preview.ignored_entities.length > 0 && <div><b>No se grafican:</b> {preview.ignored_entities.join(', ')} (no son marcas).</div>}
             </div> : null}
             <div className="awa-preview-grid">
-              {preview.analyses.map((analysis) => (
+              {preview.analyses.map((analysis, analysisIndex) => {
+                const insightKey = `${analysis.name}-${analysisIndex}`
+                const tomInsight = analysis.tom_insights
+                const csvRows = analysis.rows.map((row) => ({
+                  Marca: row.Entidad,
+                  'TOM menciones': row.TOM,
+                  'TOM %': (row['TOM %'] * 100).toFixed(1),
+                  'Espontáneo menciones': row.Espontaneo,
+                  'Espontáneo %': (row['Espontaneo %'] * 100).toFixed(1),
+                  'Ayudado menciones': row.Ayudado,
+                  'Ayudado %': (row['Ayudado %'] * 100).toFixed(1),
+                  'AWA menciones': row.AWA,
+                  'AWA %': (row['AWA %'] * 100).toFixed(1),
+                }))
+                const filePart = analysis.name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 50) || 'awareness'
+                return (
                 <article className="awa-preview-analysis" key={analysis.name}>
-                  <div className="awa-preview-analysis-title"><h4>{analysis.name}</h4><span>{analysis.rows.length} marcas</span></div>
+                  <div className="awa-preview-analysis-title">
+                    <h4>{analysis.name}</h4><span>{analysis.rows.length} marcas</span>
+                  </div>
+                  <div className="awa-export-actions">
+                    <button className="button-secondary" disabled={!analysis.rows.length} onClick={() => downloadChartPngById(`standalone-awareness-chart-${analysisIndex}`, `${filePart}_grafico.png`).catch((err) => onNotice({ text: (err as Error).message, error: true }))}><BarChart3 size={14} /> Descargar gráfico</button>
+                    <button className="button-secondary" disabled={!csvRows.length} onClick={() => downloadCsv(`${filePart}_tabla.csv`, ['Marca', 'TOM menciones', 'TOM %', 'Espontáneo menciones', 'Espontáneo %', 'Ayudado menciones', 'Ayudado %', 'AWA menciones', 'AWA %'], csvRows)}><ArrowDownToLine size={14} /> Descargar tabla</button>
+                    <button className="button-secondary" disabled={!tomInsight} onClick={() => setVisibleInsights((current) => ({ ...current, [insightKey]: !current[insightKey] }))}><BarChart3 size={14} /> {visibleInsights[insightKey] ? 'Ocultar insight' : 'Generar insight TOM'}</button>
+                  </div>
+                  {visibleInsights[insightKey] && tomInsight && <div className="awa-tom-insight">
+                    <b>Lectura de recordación · {analysis.name}</b>
+                    {tomInsight.marca_evaluada_lider
+                      ? <p>Entre las marcas evaluadas, <strong>{tomInsight.marca_evaluada_lider.marca}</strong> lidera TOM con {tomInsight.marca_evaluada_lider.menciones.toLocaleString()} menciones ({(tomInsight.marca_evaluada_lider.porcentaje * 100).toFixed(1)}% de la base).</p>
+                      : <p>No hubo menciones TOM positivas para las marcas evaluadas.</p>}
+                    {tomInsight.marca_fuera_del_catalogo_lider
+                      ? <p>Fuera de la lista evaluada, la mención con mayor frecuencia fue <strong>{tomInsight.marca_fuera_del_catalogo_lider.marca}</strong>, con {tomInsight.marca_fuera_del_catalogo_lider.menciones.toLocaleString()} menciones ({(tomInsight.marca_fuera_del_catalogo_lider.porcentaje * 100).toFixed(1)}% de la base).</p>
+                      : <p>No se encontraron menciones TOM fuera de la lista evaluada.</p>}
+                    <small>Base: {tomInsight.base.toLocaleString()} respuestas; {tomInsight.respuestas_tom.toLocaleString()} con respuesta TOM. Las menciones externas son candidatas agrupadas automáticamente: revísalas antes de agregarlas al catálogo.</small>
+                  </div>}
                   {analysis.coverage && analysis.coverage.answers > 0 && (() => {
                     const cov = analysis.coverage as Coverage
                     const share = cov.recognized / cov.answers
@@ -316,7 +365,7 @@ export default function AwarenessStandalone({ onNotice }: { onNotice: (n: { text
                     </div>
                   })()}
                   {analysis.rows.length ? <>
-                    <div className="chart-wrap awa-preview-chart">
+                    <div id={`standalone-awareness-chart-${analysisIndex}`} className="chart-wrap awa-preview-chart">
                       <ResponsiveContainer width="100%" height={Math.max(230, analysis.rows.length * 38)}>
                         <BarChart data={analysis.rows} layout="vertical" margin={{ top: 6, right: 18, left: 8, bottom: 4 }}>
                           <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e9edf3" />
@@ -339,7 +388,8 @@ export default function AwarenessStandalone({ onNotice }: { onNotice: (n: { text
                     </div>
                   </> : <div className="empty-inline">No hay marcas para graficar en este análisis.</div>}
                 </article>
-              ))}
+                )
+              })}
             </div>
           </section>
         ) : <div className="awa-preview-placeholder"><BarChart3 size={17} /><span>Al calcular el Awareness, aquí aparecerán los gráficos de ambos análisis.</span></div>}

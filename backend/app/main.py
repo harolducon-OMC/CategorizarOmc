@@ -17,11 +17,11 @@ from .db import Base, engine, get_db
 from .models import Classification, ClassificationDraft, Respondent, Study
 from .auth_models import User, UserApiKey
 from .security import (create_access_token, decrypt_api_key, email_is_allowed, encrypt_api_key, hash_password, token_subject, validate_security_config, verify_password)
-from .schemas import AwarenessAnalysisRequest, AwarenessRequest, ClassificationDraftRequest, ClassifyRequest, LabelsBatchEdit, ProposeRequest
-from .services import create_llm, create_study, dataframe_for_study, excel_sheets, get_study
+from .schemas import AwarenessAnalysisRequest, AwarenessRequest, ClassificationDraftRequest, ClassifyRequest, HelpChatRequest, LabelsBatchEdit, ProposeRequest
+from .services import create_llm, create_study, dataframe_for_study, excel_sheets, get_study, get_user_id
 from pydantic import BaseModel, Field
 from sqlalchemy import func
-from core import awareness, brands, coding, export, insights
+from core import awareness, awareness_flex as awareness_flexible, brands, coding, export, help_assistant, insights
 from core.llm import PROVIDER_CONFIG
 from .awareness_flex import router as awareness_flex_router
 
@@ -91,8 +91,16 @@ def _draft_json(item: ClassificationDraft) -> dict:
     }
 
 
-def _class_or_404(db: Session, classification_id: str) -> Classification:
-    item = db.get(Classification, classification_id)
+def get_current_user_id(request: Request, db: Session = Depends(get_db)) -> str:
+    return get_user_id(db, request.state.user_email)
+
+
+def _class_or_404(db: Session, classification_id: str, owner_id: str) -> Classification:
+    item = db.scalar(
+        select(Classification)
+        .join(Study, Classification.study_id == Study.id)
+        .where(Classification.id == classification_id, Study.owner_id == owner_id)
+    )
     if item is None:
         raise HTTPException(404, "No se encontró la clasificación.")
     return item
@@ -223,6 +231,30 @@ def providers():
             for key, item in PROVIDER_CONFIG.items()]
 
 
+@app.post("/api/help/chat")
+def platform_help_chat(
+    payload: HelpChatRequest, http_request: Request, db: Session = Depends(get_db),
+    api_key: Optional[str] = Header(default=None, alias="X-LLM-API-Key"),
+):
+    if payload.messages[-1].role != "user":
+        raise HTTPException(422, "El último mensaje debe ser una pregunta del usuario.")
+    api_key = _api_key_for_user(db, http_request.state.user_email, payload.provider, api_key)
+    if not api_key:
+        offline_answer = help_assistant.answer_without_model(
+            [message.model_dump() for message in payload.messages]
+        )
+        if offline_answer:
+            return {"answer": offline_answer}
+    llm = create_llm(payload.provider, payload.model, api_key)
+    try:
+        response = help_assistant.answer_question(
+            llm, [message.model_dump() for message in payload.messages]
+        )
+    except Exception as exc:
+        raise HTTPException(502, f"No se pudo responder la pregunta: {exc}") from exc
+    return {"answer": response}
+
+
 @app.post("/api/uploads/sheets")
 async def upload_sheets(file: UploadFile = File(...)):
     raw = await file.read()
@@ -230,39 +262,54 @@ async def upload_sheets(file: UploadFile = File(...)):
 
 
 @app.get("/api/studies")
-def list_studies(db: Session = Depends(get_db)):
-    studies = db.scalars(select(Study).order_by(Study.created_at.desc())).all()
+def list_studies(
+    db: Session = Depends(get_db), owner_id: str = Depends(get_current_user_id),
+):
+    studies = db.scalars(
+        select(Study).where(Study.owner_id == owner_id).order_by(Study.created_at.desc())
+    ).all()
     return [_study_json(study) for study in studies]
 
 
 @app.post("/api/studies")
 async def upload_study(
     file: UploadFile = File(...), name: str = Form(""), sheet: str = Form(""),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db), owner_id: str = Depends(get_current_user_id),
 ):
     raw = await file.read()
-    study = create_study(db, raw, file.filename or "encuesta.csv", name or None, sheet or None)
+    study = create_study(
+        db, raw, file.filename or "encuesta.csv", name or None, sheet or None, owner_id
+    )
     return _study_json(study)
 
 
 @app.get("/api/studies/{study_id}")
-def get_study_detail(study_id: str, db: Session = Depends(get_db)):
-    study = get_study(db, study_id)
+def get_study_detail(
+    study_id: str, db: Session = Depends(get_db),
+    owner_id: str = Depends(get_current_user_id),
+):
+    study = get_study(db, study_id, owner_id)
     classifications = db.scalars(select(Classification).where(Classification.study_id == study_id)).all()
     return {**_study_json(study), "classifications": [_classification_json(item) for item in classifications]}
 
 
 @app.delete("/api/studies/{study_id}")
-def delete_study(study_id: str, db: Session = Depends(get_db)):
-    study = get_study(db, study_id)
+def delete_study(
+    study_id: str, db: Session = Depends(get_db),
+    owner_id: str = Depends(get_current_user_id),
+):
+    study = get_study(db, study_id, owner_id)
     db.delete(study)
     db.commit()
     return {"deleted": True}
 
 
 @app.get("/api/studies/{study_id}/overview")
-def study_overview(study_id: str, db: Session = Depends(get_db)):
-    study = get_study(db, study_id)
+def study_overview(
+    study_id: str, db: Session = Depends(get_db),
+    owner_id: str = Depends(get_current_user_id),
+):
+    study = get_study(db, study_id, owner_id)
     frame = dataframe_for_study(db, study)
     return {
         **_study_json(study),
@@ -275,8 +322,11 @@ def study_overview(study_id: str, db: Session = Depends(get_db)):
 
 
 @app.get("/api/studies/{study_id}/drafts")
-def list_classification_drafts(study_id: str, db: Session = Depends(get_db)):
-    get_study(db, study_id)
+def list_classification_drafts(
+    study_id: str, db: Session = Depends(get_db),
+    owner_id: str = Depends(get_current_user_id),
+):
+    get_study(db, study_id, owner_id)
     drafts = db.scalars(select(ClassificationDraft).where(ClassificationDraft.study_id == study_id)
                         .order_by(ClassificationDraft.updated_at.desc())).all()
     return [_draft_json(draft) for draft in drafts]
@@ -285,8 +335,9 @@ def list_classification_drafts(study_id: str, db: Session = Depends(get_db)):
 @app.put("/api/studies/{study_id}/drafts")
 def save_classification_draft(
     study_id: str, request: ClassificationDraftRequest, db: Session = Depends(get_db),
+    owner_id: str = Depends(get_current_user_id),
 ):
-    study = get_study(db, study_id)
+    study = get_study(db, study_id, owner_id)
     if request.question not in study.columns:
         raise HTTPException(400, "La pregunta no existe en este estudio.")
     existing = db.scalar(select(ClassificationDraft).where(
@@ -313,8 +364,11 @@ def save_classification_draft(
 
 
 @app.delete("/api/studies/{study_id}/drafts/{question:path}")
-def delete_classification_draft(study_id: str, question: str, db: Session = Depends(get_db)):
-    get_study(db, study_id)
+def delete_classification_draft(
+    study_id: str, question: str, db: Session = Depends(get_db),
+    owner_id: str = Depends(get_current_user_id),
+):
+    get_study(db, study_id, owner_id)
     item = db.scalar(select(ClassificationDraft).where(
         ClassificationDraft.study_id == study_id, ClassificationDraft.question == question
     ))
@@ -325,8 +379,11 @@ def delete_classification_draft(study_id: str, question: str, db: Session = Depe
 
 
 @app.get("/api/studies/{study_id}/rows")
-def study_rows(study_id: str, offset: int = 0, limit: int = 50, db: Session = Depends(get_db)):
-    study = get_study(db, study_id)
+def study_rows(
+    study_id: str, offset: int = 0, limit: int = 50, db: Session = Depends(get_db),
+    owner_id: str = Depends(get_current_user_id),
+):
+    study = get_study(db, study_id, owner_id)
     limit = max(1, min(limit, 300))
     rows = db.scalars(select(Respondent).where(Respondent.study_id == study_id)
                       .order_by(Respondent.row_index).offset(max(offset, 0)).limit(limit)).all()
@@ -334,8 +391,11 @@ def study_rows(study_id: str, offset: int = 0, limit: int = 50, db: Session = De
 
 
 @app.get("/api/studies/{study_id}/values")
-def study_column_values(study_id: str, column: str, db: Session = Depends(get_db)):
-    study = get_study(db, study_id)
+def study_column_values(
+    study_id: str, column: str, db: Session = Depends(get_db),
+    owner_id: str = Depends(get_current_user_id),
+):
+    study = get_study(db, study_id, owner_id)
     if column not in study.columns:
         raise HTTPException(400, "La columna no existe en este estudio.")
     rows = db.scalars(select(Respondent).where(Respondent.study_id == study_id)
@@ -350,8 +410,9 @@ def study_column_values(study_id: str, column: str, db: Session = Depends(get_db
 def propose_categories(
     study_id: str, request: ProposeRequest, http_request: Request, db: Session = Depends(get_db),
     api_key: Optional[str] = Header(default=None, alias="X-LLM-API-Key"),
+    owner_id: str = Depends(get_current_user_id),
 ):
-    study = get_study(db, study_id)
+    study = get_study(db, study_id, owner_id)
     if request.question not in study.columns:
         raise HTTPException(400, "La pregunta no existe en este estudio.")
     api_key = _api_key_for_user(db, http_request.state.user_email, request.provider, api_key)
@@ -371,8 +432,9 @@ def propose_categories(
 def classify_question(
     study_id: str, request: ClassifyRequest, http_request: Request, db: Session = Depends(get_db),
     api_key: Optional[str] = Header(default=None, alias="X-LLM-API-Key"),
+    owner_id: str = Depends(get_current_user_id),
 ):
-    study = get_study(db, study_id)
+    study = get_study(db, study_id, owner_id)
     if request.question not in study.columns:
         raise HTTPException(400, "La pregunta no existe en este estudio.")
     api_key = _api_key_for_user(db, http_request.state.user_email, request.provider, api_key)
@@ -454,17 +516,23 @@ def classify_question(
 
 
 @app.get("/api/studies/{study_id}/classifications")
-def list_classifications(study_id: str, db: Session = Depends(get_db)):
-    get_study(db, study_id)
+def list_classifications(
+    study_id: str, db: Session = Depends(get_db),
+    owner_id: str = Depends(get_current_user_id),
+):
+    get_study(db, study_id, owner_id)
     items = db.scalars(select(Classification).where(Classification.study_id == study_id)
                        .order_by(Classification.updated_at.desc())).all()
     return [_classification_json(item) for item in items]
 
 
 @app.get("/api/classifications/{classification_id}/rows")
-def classification_rows(classification_id: str, offset: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    item = _class_or_404(db, classification_id)
-    study = get_study(db, item.study_id)
+def classification_rows(
+    classification_id: str, offset: int = 0, limit: int = 100,
+    db: Session = Depends(get_db), owner_id: str = Depends(get_current_user_id),
+):
+    item = _class_or_404(db, classification_id, owner_id)
+    study = get_study(db, item.study_id, owner_id)
     limit = max(1, min(limit, 300))
     rows = db.scalars(select(Respondent).where(Respondent.study_id == study.id)
                       .order_by(Respondent.row_index).offset(max(offset, 0)).limit(limit)).all()
@@ -478,9 +546,12 @@ def classification_rows(classification_id: str, offset: int = 0, limit: int = 10
 
 
 @app.patch("/api/classifications/{classification_id}/labels")
-def edit_labels(classification_id: str, request: LabelsBatchEdit, db: Session = Depends(get_db)):
-    item = _class_or_404(db, classification_id)
-    study = get_study(db, item.study_id)
+def edit_labels(
+    classification_id: str, request: LabelsBatchEdit, db: Session = Depends(get_db),
+    owner_id: str = Depends(get_current_user_id),
+):
+    item = _class_or_404(db, classification_id, owner_id)
+    study = get_study(db, item.study_id, owner_id)
     allowed = set(item.categories)
     if item.kind == "brands":
         allowed.update([brands.NINGUNA_LABEL, brands.OTHER_BRAND_LABEL, coding.NSNR_LABEL])
@@ -514,9 +585,12 @@ def edit_labels(classification_id: str, request: LabelsBatchEdit, db: Session = 
 
 
 @app.get("/api/classifications/{classification_id}/frequencies")
-def frequencies(classification_id: str, db: Session = Depends(get_db)):
-    item = _class_or_404(db, classification_id)
-    study = get_study(db, item.study_id)
+def frequencies(
+    classification_id: str, db: Session = Depends(get_db),
+    owner_id: str = Depends(get_current_user_id),
+):
+    item = _class_or_404(db, classification_id, owner_id)
+    study = get_study(db, item.study_id, owner_id)
     frame = dataframe_for_study(db, study)
     labels = _labels_without_blank_responses(item.labels, frame[item.question].tolist())
     table = coding.frequency_table(labels, item.categories)
@@ -524,9 +598,12 @@ def frequencies(classification_id: str, db: Session = Depends(get_db)):
 
 
 @app.get("/api/classifications/{classification_id}/segments")
-def segment_table(classification_id: str, column: str, db: Session = Depends(get_db)):
-    item = _class_or_404(db, classification_id)
-    study = get_study(db, item.study_id)
+def segment_table(
+    classification_id: str, column: str, db: Session = Depends(get_db),
+    owner_id: str = Depends(get_current_user_id),
+):
+    item = _class_or_404(db, classification_id, owner_id)
+    study = get_study(db, item.study_id, owner_id)
     if column not in study.columns:
         raise HTTPException(400, "La columna de segmento no existe.")
     frame = dataframe_for_study(db, study)
@@ -543,9 +620,10 @@ def segment_table(classification_id: str, column: str, db: Session = Depends(get
 def generate_insights(
     classification_id: str, http_request: Request, provider: str = Form("gemini"), model: str = Form("gemini-3.5-flash-lite"),
     db: Session = Depends(get_db), api_key: Optional[str] = Header(default=None, alias="X-LLM-API-Key"),
+    owner_id: str = Depends(get_current_user_id),
 ):
-    item = _class_or_404(db, classification_id)
-    study = get_study(db, item.study_id)
+    item = _class_or_404(db, classification_id, owner_id)
+    study = get_study(db, item.study_id, owner_id)
     api_key = _api_key_for_user(db, http_request.state.user_email, provider, api_key)
     llm = create_llm(provider, model, api_key)
     frame = dataframe_for_study(db, study)
@@ -564,9 +642,12 @@ def generate_insights(
 
 
 @app.get("/api/classifications/{classification_id}/export")
-def export_classification(classification_id: str, db: Session = Depends(get_db)):
-    item = _class_or_404(db, classification_id)
-    study = get_study(db, item.study_id)
+def export_classification(
+    classification_id: str, db: Session = Depends(get_db),
+    owner_id: str = Depends(get_current_user_id),
+):
+    item = _class_or_404(db, classification_id, owner_id)
+    study = get_study(db, item.study_id, owner_id)
     frame = dataframe_for_study(db, study)
     labels = _labels_without_blank_responses(item.labels, frame[item.question].tolist())
     report = export.build_study_categorization_excel(frame, [{
@@ -584,8 +665,11 @@ def export_classification(classification_id: str, db: Session = Depends(get_db))
 
 
 @app.get("/api/studies/{study_id}/export-categorizations")
-def export_study_categorizations(study_id: str, db: Session = Depends(get_db)):
-    study = get_study(db, study_id)
+def export_study_categorizations(
+    study_id: str, db: Session = Depends(get_db),
+    owner_id: str = Depends(get_current_user_id),
+):
+    study = get_study(db, study_id, owner_id)
     saved = db.scalars(select(Classification).where(Classification.study_id == study_id)).all()
     by_question = {item.question: item for item in saved}
     ordered = [by_question[column] for column in study.columns if column in by_question]
@@ -610,10 +694,13 @@ def export_study_categorizations(study_id: str, db: Session = Depends(get_db)):
 
 
 @app.post("/api/studies/{study_id}/awareness")
-def calculate_awareness(study_id: str, request: AwarenessRequest, db: Session = Depends(get_db)):
-    study = get_study(db, study_id)
+def calculate_awareness(
+    study_id: str, request: AwarenessRequest, db: Session = Depends(get_db),
+    owner_id: str = Depends(get_current_user_id),
+):
+    study = get_study(db, study_id, owner_id)
     source_ids = list(dict.fromkeys(request.classification_ids or [request.classification_id]))
-    source_items = [_class_or_404(db, class_id) for class_id in source_ids]
+    source_items = [_class_or_404(db, class_id, owner_id) for class_id in source_ids]
     if any(item.study_id != study_id or item.kind != "brands" for item in source_items):
         raise HTTPException(400, "Selecciona una clasificación de marcas de este estudio.")
     frame = dataframe_for_study(db, study)
@@ -678,7 +765,18 @@ def calculate_awareness(study_id: str, request: AwarenessRequest, db: Session = 
                 indicators, analysis_frame, request.segment_column or None,
                 selected_value if request.segment_column else None, entities,
             )
-            analysis_results.append({"name": config["name"], "rows": table.to_dict(orient="records")})
+            rows = table.to_dict(orient="records")
+            tom_frame = frame
+            if request.segment_column:
+                segment_mask = frame[request.segment_column].fillna("Sin dato").astype(str) == selected_value
+                tom_frame = frame.loc[segment_mask].copy()
+            tom_insights = awareness_flexible.build_tom_insights(
+                tom_frame, {"tom": config["tom"], "tom_first_only": True},
+                entities, merged_aliases, [], rows,
+            )
+            analysis_results.append({
+                "name": config["name"], "rows": rows, "tom_insights": tom_insights,
+            })
     except Exception as exc:
         raise HTTPException(400, f"No se pudo calcular Awareness: {exc}") from exc
     base = len(frame) if not request.segment_column else int(

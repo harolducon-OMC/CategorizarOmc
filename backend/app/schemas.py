@@ -61,3 +61,14 @@ class AwarenessRequest(BaseModel):
     demographics: dict[str, str] = Field(default_factory=dict)
     segment_column: str = ""
     segment_value: str = ""
+
+
+class HelpChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=2000)
+
+
+class HelpChatRequest(BaseModel):
+    provider: str = "gemini"
+    model: str = "gemini-3.5-flash-lite"
+    messages: list[HelpChatMessage] = Field(min_length=1, max_length=12)

@@ -14,11 +14,13 @@ Primera migración local de la Plataforma de Insights. Mantiene en Python la ló
 - Diccionario opcional por categoría (sinónimos/palabras clave): las coincidencias explícitas se aplican antes del LLM; las respuestas sin coincidencia siguen al modelo.
 - API keys por usuario y proveedor: se guardan cifradas, pueden reemplazarse o eliminarse desde Ajustes y el backend las carga automáticamente al clasificar.
 - Frecuencias, cruces por segmento, generación de insights con citas de las respuestas y descarga de reporte Excel.
+- Asistente de ayuda accesible desde cualquier pantalla autenticada: explica flujos, categorización, proveedores/API keys, Awareness y edición usando el proveedor y modelo elegidos. El chat no guarda el historial.
 - Revisión de las primeras respuestas en el Dashboard y corrección manual de etiquetas, guardada en PostgreSQL.
 - Flujo de categorización por pregunta con tres pasos: configurar, revisar catálogo y clasificar/editar; los catálogos aún no aplicados quedan guardados por estudio y pregunta en `classification_drafts`.
 - Navegación de preguntas con estado pendiente/borrador/lista; al completar una pregunta puedes pasar a la siguiente sin perder los resultados anteriores.
 - Selector desplegable de proveedor, modelo y clave temporal de sesión en la barra superior; la gestión persistente de claves se encuentra en Ajustes.
 - Módulo Awareness autónomo basado en la aplicación Streamlit original: carga directamente CSV/XLSX, ofrece modos Bancos, Conglomerados y Personalizado, configura entidades, alias, normalizaciones, preguntas y demográficos, valida columnas y exporta el reporte Excel sin depender de un estudio ni del flujo de categorización. Corre como servicio separado en el puerto 8501.
+- En ambos modos de Awareness se pueden descargar por separado el gráfico como PNG y la tabla como CSV. El botón **Generar insight TOM** compara la marca con más recordación entre las evaluadas con la mención más frecuente fuera del catálogo; las marcas externas son candidatas agrupadas automáticamente y deben revisarse antes de añadirlas.
 - API documentada automáticamente en `http://localhost:8000/docs`.
 
 El acceso requiere login y el registro limita el correo al dominio configurado. Los tokens de acceso JWT expiran según `ACCESS_TOKEN_MINUTES`. La clasificación por diccionario se combina con el clasificador LLM actual. Las llamadas largas de IA se procesan en la petición actual; para despliegue multiusuario conviene añadir worker/cola, auditoría y almacenamiento de archivos más robusto.
@@ -27,7 +29,7 @@ El acceso requiere login y el registro limita el correo al dominio configurado. 
 
 La versión incluida usa el cliente LLM ya existente (Gemini/Groq/Cohere/OpenRouter/Anthropic) con catálogo cerrado, y ahora consulta primero las palabras clave/sinónimos del diccionario. **No se instalaron ni se conectaron todavía `cat-survey`, `cat-llm`, BERTopic ni un modelo de embeddings**: son motores distintos y no se intercambian directamente. Para integrar `cat-survey`/`cat-llm` habría que adaptar su llamada y normalizar el formato de salida al esquema de filas/categorías de esta API. BERTopic es más útil para descubrir temas o entrenar con etiquetas humanas; para asignar un catálogo definido a cada respuesta, embeddings + ejemplos etiquetados y un umbral de confianza son un camino separado. Recomiendo conservar LLM + diccionario como ruta principal y añadir embeddings como opción de menor costo, con revisión humana de baja confianza; reservar BERTopic para exploración y propuesta de categorías.
 
-La plataforma tampoco aísla actualmente estudios por usuario: el login protege las rutas, pero los usuarios autenticados comparten los estudios guardados. Para datos sensibles o distintos equipos, falta incorporar ownership/roles y migrar la base antes de producción.
+El backend ahora asigna cada estudio a la cuenta que lo sube y limita a esa cuenta las operaciones sobre el estudio, sus filas, borradores, clasificaciones y exportaciones. Para una base Neon ya existente, ejecuta `backend/migrations/002_study_owner.sql` antes de desplegar este código; los estudios antiguos quedan ocultos hasta asignarles explícitamente un dueño. Después de asignar todos, ejecuta `003_enforce_study_owner.sql`. No se debe adjudicar la información histórica por suposición.
 
 ## Opción recomendada: iniciar con Docker Desktop
 
@@ -146,13 +148,15 @@ docker-compose.yml     PostgreSQL + API + frontend
 
 La API crea `user_api_keys` al arrancar si `users` ya existe. Para crearla manualmente, conectado a la base `insights` y después de que `users` exista, ejecuta `backend/migrations/001_user_api_keys.sql`. La tabla almacena el ciphertext (no la clave en claro), usa `(user_id, provider)` como clave primaria y borra las claves al borrar al usuario. No cambies `JWT_SECRET` tras guardar claves.
 
+Para aislar estudios, no se crea una tabla nueva: `002_study_owner.sql` agrega `owner_id` a `studies` y una clave foránea hacia `users.id`. Primero identifica los estudios sin dueño y los usuarios con las consultas comentadas en esa migración; asigna cada estudio solo después de confirmar su propietario. Luego ejecuta `003_enforce_study_owner.sql`, que aborta si queda algún estudio sin dueño y hace obligatorio el campo.
+
 ## Modelo de datos local
 
-- `studies`: metadatos de cada encuesta.
+- `studies`: metadatos de cada encuesta y `owner_id` de la cuenta propietaria.
 - `respondents`: una fila JSONB por respuesta de encuesta, con el número original de fila.
 - `classifications`: categorías, etiquetas, aliases de marca, configuración e insights por pregunta.
 
-La API crea las tablas cuando inicia. En Docker, PostgreSQL vive en un volumen; en el modo Windows sin Docker, usa el servicio PostgreSQL instalado localmente. No se suben los archivos del estudio a un servicio de Manus.
+La API crea las tablas cuando inicia, pero `create_all` no migra tablas existentes; aplica los scripts SQL de `backend/migrations/` en esas bases. En Docker, PostgreSQL vive en un volumen; en el modo Windows sin Docker, usa el servicio PostgreSQL instalado localmente. No se suben los archivos del estudio a un servicio de Manus.
 
 ## Pruebas de lógica
 
@@ -166,4 +170,4 @@ Las pruebas de marcas, diccionario, sentimiento e importación no requieren cred
 
 ## Notas de seguridad
 
-La configuración está pensada para desarrollo local. **No publiques estos puertos ni despliegues la aplicación directamente en Internet.** Todas las rutas `/api` excepto salud, registro e inicio de sesión requieren `Authorization: Bearer <JWT>`. El token se guarda en `sessionStorage`, se expira y el password se almacena con hash Argon2. Antes de un despliegue real todavía se recomienda HTTPS, limitación de intentos de login, autorización por usuario/estudio, registros de auditoría, backups y endurecimiento del CORS. Una API key escrita en Ajustes no persiste, pero sí se envía desde el navegador local a la API local y luego al proveedor seleccionado.
+La configuración está pensada para desarrollo local. **No publiques estos puertos ni despliegues la aplicación directamente en Internet.** Todas las rutas `/api` excepto salud, registro e inicio de sesión requieren `Authorization: Bearer <JWT>`. El token se guarda en `sessionStorage`, se expira y el password se almacena con hash Argon2. El backend filtra los estudios por propietario; aun así, antes de un despliegue real se recomienda HTTPS, limitación de intentos de login, registros de auditoría, backups y endurecimiento del CORS. Una API key escrita en Ajustes no persiste, pero sí se envía desde el navegador a la API y luego al proveedor seleccionado.
