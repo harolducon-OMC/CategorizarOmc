@@ -1,10 +1,18 @@
 .help-assistant-root{position:fixed;right:24px;bottom:22px;z-index:30;font-size:13px}
-.help-assistant-toggle{height:46px;min-width:46px;padding:0 16px;border:0;border-radius:999px;background:#315bdb;color:#fff;display:flex;align-items:center;justify-content:center;gap:8px;box-shadow:0 8px 24px rgba(27,54,132,.26);font-size:12px;font-weight:700}
-.help-assistant-toggle:hover{background:#274dc3;transform:translateY(-1px)}
-.help-assistant-toggle.open{width:46px;padding:0;background:#273751}
-.help-chat-panel{position:absolute;right:0;bottom:58px;width:min(390px,calc(100vw - 28px));height:min(590px,calc(100vh - 112px));display:flex;flex-direction:column;background:#fff;border:1px solid #e3e8f0;border-radius:15px;box-shadow:0 18px 58px rgba(20,35,66,.22);overflow:hidden}
+
+/* Botón flotante con el robot */
+.help-assistant-toggle{width:62px;height:62px;min-width:62px;padding:0;border:0;border-radius:50%;background:#315bdb;color:#fff;display:flex;align-items:center;justify-content:center;position:relative;box-shadow:0 8px 24px rgba(27,54,132,.26);animation:robot-float 3.2s ease-in-out infinite}
+.help-assistant-toggle:hover{background:#274dc3;transform:scale(1.08)}
+.help-assistant-toggle .ico-close{display:none}
+.help-assistant-toggle.open{background:#273751;animation:none}
+.help-assistant-toggle.open .robot{display:none}
+.help-assistant-toggle.open .ico-close{display:block}
+
+/* Panel del chat */
+.help-chat-panel{position:absolute;right:0;bottom:74px;width:min(390px,calc(100vw - 28px));height:min(590px,calc(100vh - 128px));display:flex;flex-direction:column;background:#fff;border:1px solid #e3e8f0;border-radius:15px;box-shadow:0 18px 58px rgba(20,35,66,.22);overflow:hidden}
+.help-chat-panel[hidden]{display:none}
 .help-chat-header{height:62px;flex:none;display:flex;align-items:center;gap:10px;padding:0 14px;border-bottom:1px solid #edf0f5;background:#fbfcfe}
-.help-chat-mark{width:34px;height:34px;display:grid;place-items:center;border-radius:10px;background:#edf2ff;color:#315bdb}
+.help-chat-mark{width:38px;height:38px;display:grid;place-items:center;border-radius:11px;background:#315bdb;color:#fff}
 .help-chat-header>div{min-width:0;flex:1}
 .help-chat-header b,.help-chat-header small{display:block}
 .help-chat-header b{font-size:12px;color:#29354b}
@@ -26,4 +34,27 @@
 .help-chat-composer>button{height:36px;width:36px;flex:none;display:grid;place-items:center;border:0;border-radius:9px;background:#315bdb;color:#fff}
 .help-chat-composer>button:disabled{background:#c5cde0}
 .help-chat-footnote{flex:none;padding:0 13px 10px;color:#9aa3b1;background:#fff;font-size:9px}
-@media(max-width:620px){.help-assistant-root{right:14px;bottom:14px}.help-chat-panel{right:-2px;bottom:56px;height:min(560px,calc(100vh - 96px))}}
+
+/* Animaciones del robot */
+.robot-eye{transform-box:fill-box;transform-origin:center;animation:robot-blink 4.5s infinite}
+.robot-antenna{animation:robot-pulse 1.8s ease-in-out infinite}
+.help-assistant-toggle:hover .robot{animation:robot-wave .6s ease-in-out}
+@keyframes robot-float{0%,100%{translate:0 0}50%{translate:0 -5px}}
+@keyframes robot-blink{0%,92%,100%{transform:scaleY(1)}96%{transform:scaleY(.1)}}
+@keyframes robot-pulse{0%,100%{opacity:1}50%{opacity:.35}}
+@keyframes robot-wave{0%,100%{transform:rotate(0)}25%{transform:rotate(-9deg)}75%{transform:rotate(9deg)}}
+
+/* Globo de saludo */
+.help-greeting{position:absolute;right:0;bottom:76px;width:230px;padding:13px 30px 13px 14px;background:#fff;border:1px solid #e3e8f0;border-radius:14px 14px 4px 14px;box-shadow:0 12px 36px rgba(20,35,66,.2);animation:greet-in .35s ease-out}
+.help-greeting b{display:block;font-size:12px;color:#29354b;margin-bottom:3px}
+.help-greeting span{display:block;font-size:11px;line-height:1.45;color:#5d6980}
+.help-greeting-close{position:absolute;top:6px;right:8px;border:0;background:transparent;color:#9aa3b1;font-size:17px;line-height:1;padding:0}
+.help-greeting-close:hover{color:#2b3b5a}
+@keyframes greet-in{from{opacity:0;transform:translateY(8px) scale(.96)}to{opacity:1;transform:none}}
+
+@media(max-width:620px){.help-assistant-root{right:14px;bottom:14px}.help-chat-panel{right:-2px;bottom:72px;height:min(560px,calc(100vh - 110px))}.help-greeting{bottom:72px;width:min(230px,calc(100vw - 40px))}}
+
+@media (prefers-reduced-motion:reduce){
+  .help-assistant-toggle,.robot-eye,.robot-antenna,.help-greeting{animation:none}
+  .help-assistant-toggle:hover .robot{animation:none}
+}
