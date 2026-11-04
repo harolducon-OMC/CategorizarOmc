@@ -13,9 +13,6 @@ import CategorizeWorkflow from './CategorizeWorkflow'
 import AwarenessStandalone from './AwarenessStandalone'
 import FlowGuide from './FlowGuide'
 import SegmentExplorer from './SegmentExplorer'
-import HelpAssistant from './HelpAssistant'
-import { downloadAwarenessChartImage, downloadAwarenessTableImage, toAwarenessImageRows } from './downloads'
-import './AwarenessExtras.css'
 
 type Page = 'home' | 'categorize' | 'dashboard' | 'awareness' | 'settings'
 type Study = { id: string; name: string; source_filename: string; columns: string[]; row_count: number; created_at: string }
@@ -190,7 +187,7 @@ function App() {
         </div>
         {study && <div className="study-mini"><Database size={14} /> {study.row_count.toLocaleString()} respuestas <span>·</span> {study.columns.length} campos</div>}
         <div className="sidebar-spacer" />
-        <div className="sidebar-tip"><div className="tip-icon"><CircleHelp size={17} /></div><div><b>¿Necesitas ayuda?</b><span>Pregunta desde el botón «Ayuda».</span></div></div>
+        <div className="sidebar-tip"><div className="tip-icon"><CircleHelp size={17} /></div><div><b>¿Necesitas ayuda?</b><span>Consulta la guía local del proyecto.</span></div></div>
         <button className={`nav-button settings-link ${page === 'settings' ? 'active' : ''}`} onClick={() => setPage('settings')}><Settings2 size={18} /><span>Ajustes</span></button>
         <div className="local-status"><span className="online-dot" /> © 2026 Propiedad OMC</div>
       </aside>
@@ -226,12 +223,6 @@ function App() {
         </div>
         <footer className="footer-note">Insights Studio · OMC <span>© 2026 Harold Ducon and Research.</span></footer>
       </main>
-      <HelpAssistant
-        provider={provider}
-        model={model}
-        apiKey={apiKey}
-        onOpenSettings={() => setPage('settings')}
-      />
     </div>
   )
 }
@@ -684,22 +675,14 @@ function AwarenessPage({ study, onNotice }: any) {
       </section>
       <section className="card awareness-result">
         <div className="card-heading"><div><div className="card-label">RESULTADOS</div><h3>Awareness por tipo</h3></div>{result && <span className="base-chip">Base: <b>{result.base}</b></span>}</div>
-        {resultAnalyses.length ? resultAnalyses.map((analysis: any, analysisIndex: number) => {
+        {resultAnalyses.length ? resultAnalyses.map((analysis: any) => {
           const rankedRows = [...analysis.rows].sort((a: any, b: any) =>
             (Number(b['AWA %']) - Number(a['AWA %'])) || String(a.Entidad).localeCompare(String(b.Entidad), 'es')
           )
           const chartRows = rankedRows.map((r: any) => ({ name: r.Entidad, tom: r['TOM %'], espontaneo: r['Espontaneo %'], ayudado: r['Ayudado %'] }))
-          const imageRows = toAwarenessImageRows(rankedRows)
-          const filePart = String(analysis.name || 'awareness').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 50) || 'awareness'
           return <div className="awareness-analysis-result" key={analysis.name}>
-            <div className="awa-result-toolbar">
-              <h4>{analysis.name}</h4>
-              <div className="awa-export-actions">
-                <button className="button-secondary" disabled={!imageRows.length} onClick={() => downloadAwarenessChartImage(imageRows, { title: `Awareness · ${analysis.name}`, subtitle: `Base: ${Number(result?.base || 0).toLocaleString('es-CO')} encuestados`, filename: `${filePart}_grafico.png` }).catch((err) => onNotice({ text: (err as Error).message, error: true }))}><BarChart3 size={14} /> Descargar gráfico</button>
-                <button className="button-secondary" disabled={!imageRows.length} onClick={() => downloadAwarenessTableImage(imageRows, { title: `Awareness · ${analysis.name}`, subtitle: `Base: ${Number(result?.base || 0).toLocaleString('es-CO')} encuestados`, filename: `${filePart}_tabla.png` }).catch((err) => onNotice({ text: (err as Error).message, error: true }))}><ArrowDownToLine size={14} /> Descargar tabla</button>
-              </div>
-            </div>
-            <div id={`integrated-awareness-chart-${analysisIndex}`} className="chart-wrap"><ResponsiveContainer width="100%" height={Math.max(260, chartRows.length * 40)}><BarChart data={chartRows} layout="vertical" margin={{ left: 18, right: 26 }}><CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e9edf3" /><XAxis type="number" tickFormatter={(v) => `${Math.round(v * 100)}%`} axisLine={false} tickLine={false} /><YAxis type="category" dataKey="name" width={130} reversed axisLine={false} tickLine={false} /><Tooltip formatter={(v: any) => `${(Number(v) * 100).toFixed(1)}%`} /><Bar dataKey="tom" name="TOM" stackId="a" fill="#315bdb" /><Bar dataKey="espontaneo" name="Espontáneo" stackId="a" fill="#18a994" /><Bar dataKey="ayudado" name="Ayudado" stackId="a" fill="#ef9b46" /></BarChart></ResponsiveContainer></div>
+            <h4>{analysis.name}</h4>
+            <div className="chart-wrap"><ResponsiveContainer width="100%" height={Math.max(260, chartRows.length * 40)}><BarChart data={chartRows} layout="vertical" margin={{ left: 18, right: 26 }}><CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e9edf3" /><XAxis type="number" tickFormatter={(v) => `${Math.round(v * 100)}%`} axisLine={false} tickLine={false} /><YAxis type="category" dataKey="name" width={130} reversed axisLine={false} tickLine={false} /><Tooltip formatter={(v: any) => `${(Number(v) * 100).toFixed(1)}%`} /><Bar dataKey="tom" name="TOM" stackId="a" fill="#315bdb" /><Bar dataKey="espontaneo" name="Espontáneo" stackId="a" fill="#18a994" /><Bar dataKey="ayudado" name="Ayudado" stackId="a" fill="#ef9b46" /></BarChart></ResponsiveContainer></div>
             <div className="table-scroll"><table><thead><tr><th>Marca</th><th>TOM</th><th>Espontáneo</th><th>Ayudado</th><th>AWA</th></tr></thead><tbody>{rankedRows.map((r: any) => <tr key={r.Entidad}><td>{r.Entidad}</td><td>{(r['TOM %'] * 100).toFixed(1)}%</td><td>{(r['Espontaneo %'] * 100).toFixed(1)}%</td><td>{(r['Ayudado %'] * 100).toFixed(1)}%</td><td><b>{(r['AWA %'] * 100).toFixed(1)}%</b></td></tr>)}</tbody></table></div>
           </div>
         }) : <div className="empty-panel large-empty"><div className="empty-icon"><UsersRound size={20} /></div><b>Configura ambos análisis</b><span>El flujo usará las respuestas categorizadas y calculará TOM, espontáneo y ayudado por separado para cada perfil.</span></div>}
