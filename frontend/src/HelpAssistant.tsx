@@ -33,7 +33,9 @@ export default function HelpAssistant({
   const [needsKey, setNeedsKey] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), [messages, busy, open])
+  useEffect(() => {
+  if (open) bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+}, [messages, busy, open])
 
   async function sendQuestion(question: string) {
     const content = question.trim()
