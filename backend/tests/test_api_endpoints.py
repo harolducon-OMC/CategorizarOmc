@@ -25,6 +25,8 @@ except ImportError:  # pragma: no cover - entorno sin dependencias de la API
 
 SECRET = "t" * 64
 PUBLIC_PATHS = {"/api/health", "/api/auth/register", "/api/auth/login"}
+# Rutas de documentación autogeneradas por FastAPI: son públicas por diseño.
+DOCS_PATHS = {"/docs", "/docs/oauth2-redirect", "/redoc", "/openapi.json"}
 
 
 @unittest.skipUnless(API_AVAILABLE, "FastAPI/httpx no están instalados")
@@ -65,7 +67,12 @@ class ApiHttpLayerTests(unittest.TestCase):
             for route in routes:
                 if isinstance(route, (APIRoute, Route)):
                     path = getattr(route, "path", "")
-                    if not path or not path.startswith("/") or path in PUBLIC_PATHS or path in {"/docs", "/redoc", "/openapi.json"}:
+                    if (
+                        not path
+                        or not path.startswith("/")
+                        or path in PUBLIC_PATHS
+                        or path in DOCS_PATHS
+                    ):
                         continue
                     for method in sorted(set(route.methods or []) - {"HEAD", "OPTIONS"}):
                         url = re.sub(r"\{[^}]+\}", "x", path)
