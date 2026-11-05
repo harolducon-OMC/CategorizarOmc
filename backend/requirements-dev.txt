@@ -1,0 +1,3 @@
+# Solo para pruebas y CI (no se instala en producción)
+-r requirements.txt
+httpx>=0.27,<1

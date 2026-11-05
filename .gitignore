@@ -1,6 +1,7 @@
 node_modules/
 .env
 .env.*
+!.env.example
 venv/
 __pycache__/
 *.pyc
@@ -9,3 +10,4 @@ build/
 .vscode/
 .idea/
 *.sql
+!backend/migrations/*.sql

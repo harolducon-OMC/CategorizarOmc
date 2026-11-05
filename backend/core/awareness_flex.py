@@ -126,44 +126,6 @@ def detect_columns(columns: List[str], config: Dict[str, Any]) -> List[Dict[str,
     return rows
 
 
-def preview_results(frame: pd.DataFrame, config: Dict[str, Any]) -> Dict[str, Any]:
-    """Return the same general Awareness tables used by the downloadable report."""
-    if config["max_rows"]:
-        frame = frame.head(config["max_rows"]).copy()
-
-    active_analyses = [cfg for cfg in config["analyses"] if _active(cfg)]
-    if not active_analyses:
-        raise ValueError("Debe configurar al menos un análisis válido (TOM, Espontáneo o Ayudado).")
-
-    demo_cols = {
-        key: awareness.find_col(frame, config["demographics"].get(key, ""))
-        for key in DEMO_KEYS
-    }
-    analyses = []
-    for cfg in active_analyses:
-        _, indicators, _ = awareness.build_analysis(
-            frame, demo_cols, cfg, config["entities"], config["aliases"],
-            config["normalizations"], config["expected_raw_cols"],
-        )
-        table = awareness.category_table(indicators, frame, None, None, config["entities"])
-        rows = []
-        for record in table.to_dict(orient="records"):
-            rows.append({
-                "Entidad": str(record["Entidad"]),
-                "TOM": int(record["TOM"]),
-                "TOM %": float(record["TOM %"]),
-                "Espontaneo": int(record["Espontaneo"]),
-                "Espontaneo %": float(record["Espontaneo %"]),
-                "Ayudado": int(record["Ayudado"]),
-                "Ayudado %": float(record["Ayudado %"]),
-                "AWA": int(record["AWA"]),
-                "AWA %": float(record["AWA %"]),
-            })
-        analyses.append({"name": cfg["name"], "rows": rows})
-
-    return {"base": int(len(frame)), "analyses": analyses}
-
-
 # ============================================================ agrupar variantes parecidas
 def _pieces(value) -> List[str]:
     """Trozos de una celda: "Puma, Nike y Adidas" -> ["Puma", "Nike", "Adidas"]."""
@@ -322,7 +284,12 @@ def generate_report(frame: pd.DataFrame, config: Dict[str, Any]) -> bytes:
 
 
 def preview_results(frame: pd.DataFrame, config: Dict[str, Any]) -> Dict[str, Any]:
-    """Mismas tablas del reporte descargable + cobertura y variantes agrupadas."""
+    """Mismas tablas del reporte descargable + cobertura y variantes agrupadas.
+
+    Incluye la base usada: ``rows_total`` (filas del archivo), ``rows_used`` (filas evaluadas)
+    y ``trimmed`` (True si «Filas a evaluar» recortó el archivo).
+    """
+    rows_total = int(len(frame))
     frame, config, learned = _prepare(frame, config)
     active_analyses = [cfg for cfg in config["analyses"] if _active(cfg)]
     if not active_analyses:
@@ -345,9 +312,15 @@ def preview_results(frame: pd.DataFrame, config: Dict[str, Any]) -> Dict[str, An
                 "Ayudado": int(record["Ayudado"]), "Ayudado %": float(record["Ayudado %"]),
                 "AWA": int(record["AWA"]), "AWA %": float(record["AWA %"]),
             })
-        analyses.append({"name": cfg["name"], "rows": rows, "coverage": _coverage(frame, cfg, indicators, config["entities"])})
+        analyses.append({
+            "name": cfg["name"],
+            "rows": rows,
+            "coverage": _coverage(frame, cfg, indicators, config["entities"]),
+        })
 
     return {
         "base": int(len(frame)), "analyses": analyses,
+        "rows_total": rows_total, "rows_used": int(len(frame)),
+        "trimmed": int(len(frame)) < rows_total,
         "learned_variants": learned, "ignored_entities": config.get("ignored_entities", []),
     }

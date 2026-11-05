@@ -3,6 +3,7 @@ import { ArrowDownToLine, BarChart3, Check, FileSpreadsheet, LoaderCircle, Uploa
 import {
   Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
+import { downloadAwarenessChartImage, downloadAwarenessTableImage, toAwarenessImageRows } from './downloads'
 
 /**
  * Awareness INDEPENDIENTE: carga un CSV/XLSX propio y descarga el Excel de resultados.
@@ -19,14 +20,21 @@ type Inspect = { filename: string; sheets: string[]; columns: string[]; row_coun
 type ValidationRow = { tipo: string; campo: string; columnas: string }
 type PreviewRow = {
   Entidad: string
+  TOM: number
   'TOM %': number
+  Espontaneo: number
   'Espontaneo %': number
+  Ayudado: number
   'Ayudado %': number
+  AWA: number
   'AWA %': number
 }
 type Coverage = { question: string; role: string; answers: number; recognized: number; unrecognized: { respuesta: string; n: number }[] }
 type Preview = {
   base: number
+  rows_total?: number
+  rows_used?: number
+  trimmed?: boolean
   analyses: { name: string; rows: PreviewRow[]; coverage?: Coverage | null }[]
   learned_variants?: { variante: string; marca: string; n: number }[]
   ignored_entities?: string[]
@@ -184,7 +192,7 @@ export default function AwarenessStandalone({ onNotice }: { onNotice: (n: { text
       const anchor = document.createElement('a')
       anchor.href = url; anchor.download = 'Reporte_Awareness_Estructural.xlsx'
       document.body.appendChild(anchor); anchor.click(); anchor.remove()
-      URL.revokeObjectURL(url)
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
       setDone(true)
       onNotice({ text: 'Reporte de Awareness generado y descargado.' })
     } catch (err) { onNotice({ text: (err as Error).message, error: true }) }
@@ -293,16 +301,27 @@ export default function AwarenessStandalone({ onNotice }: { onNotice: (n: { text
           <section className="awa-preview-panel">
             <div className="awa-preview-heading">
               <div><div className="card-label">RESULTADO</div><h3>Vista previa de Awareness</h3><p>Porcentaje de la base que recuerda cada entidad en cada nivel.</p></div>
-              <span className="base-chip">Base: <b>{preview.base.toLocaleString()}</b> respuestas</span>
+              <span className="base-chip">Base: <b>{preview.base.toLocaleString()}</b> respuestas{preview.trimmed && preview.rows_total ? <> de <b>{preview.rows_total.toLocaleString()}</b> del archivo</> : null}</span>
             </div>
+            {preview.trimmed && <div className="awa-base-warning" role="alert"><b>Base recortada:</b> solo se evaluaron las primeras {preview.rows_used?.toLocaleString()} de {preview.rows_total?.toLocaleString()} filas porque «Filas a evaluar» tiene un límite. Déjalo en 0 para usar todo el archivo.</div>}
             {(preview.learned_variants?.length || preview.ignored_entities?.length) ? <div className="awa-notes">
               {preview.learned_variants && preview.learned_variants.length > 0 && <div><b>Respuestas agrupadas con su marca:</b> {preview.learned_variants.slice(0, 10).map((item) => `${item.variante} → ${item.marca} (${item.n})`).join(' · ')}{preview.learned_variants.length > 10 ? ` · y ${preview.learned_variants.length - 10} más` : ''}</div>}
               {preview.ignored_entities && preview.ignored_entities.length > 0 && <div><b>No se grafican:</b> {preview.ignored_entities.join(', ')} (no son marcas).</div>}
             </div> : null}
             <div className="awa-preview-grid">
-              {preview.analyses.map((analysis) => (
+              {preview.analyses.map((analysis, analysisIndex) => {
+                const imageRows = toAwarenessImageRows(analysis.rows)
+                const baseText = `Base: ${Number(preview.base || 0).toLocaleString('es-CO')} encuestados${preview.trimmed && preview.rows_total ? ` (recortada: ${Number(preview.rows_total).toLocaleString('es-CO')} filas en el archivo)` : ''}`
+                const filePart = analysis.name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 50) || 'awareness'
+                return (
                 <article className="awa-preview-analysis" key={analysis.name}>
-                  <div className="awa-preview-analysis-title"><h4>{analysis.name}</h4><span>{analysis.rows.length} marcas</span></div>
+                  <div className="awa-preview-analysis-title">
+                    <h4>{analysis.name}</h4><span>{analysis.rows.length} marcas</span>
+                  </div>
+                  <div className="awa-export-actions">
+                    <button className="button-secondary" disabled={!imageRows.length} onClick={() => downloadAwarenessChartImage(imageRows, { title: `Awareness · ${analysis.name}`, subtitle: baseText, filename: `${filePart}_grafico.png` }).catch((err) => onNotice({ text: (err as Error).message, error: true }))}><BarChart3 size={14} /> Descargar gráfico</button>
+                    <button className="button-secondary" disabled={!imageRows.length} onClick={() => downloadAwarenessTableImage(imageRows, { title: `Awareness · ${analysis.name}`, subtitle: baseText, filename: `${filePart}_tabla.png` }).catch((err) => onNotice({ text: (err as Error).message, error: true }))}><ArrowDownToLine size={14} /> Descargar tabla</button>
+                  </div>
                   {analysis.coverage && analysis.coverage.answers > 0 && (() => {
                     const cov = analysis.coverage as Coverage
                     const share = cov.recognized / cov.answers
@@ -316,7 +335,7 @@ export default function AwarenessStandalone({ onNotice }: { onNotice: (n: { text
                     </div>
                   })()}
                   {analysis.rows.length ? <>
-                    <div className="chart-wrap awa-preview-chart">
+                    <div id={`standalone-awareness-chart-${analysisIndex}`} className="chart-wrap awa-preview-chart">
                       <ResponsiveContainer width="100%" height={Math.max(230, analysis.rows.length * 38)}>
                         <BarChart data={analysis.rows} layout="vertical" margin={{ top: 6, right: 18, left: 8, bottom: 4 }}>
                           <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e9edf3" />
@@ -339,7 +358,8 @@ export default function AwarenessStandalone({ onNotice }: { onNotice: (n: { text
                     </div>
                   </> : <div className="empty-inline">No hay marcas para graficar en este análisis.</div>}
                 </article>
-              ))}
+                )
+              })}
             </div>
           </section>
         ) : <div className="awa-preview-placeholder"><BarChart3 size={17} /><span>Al calcular el Awareness, aquí aparecerán los gráficos de ambos análisis.</span></div>}

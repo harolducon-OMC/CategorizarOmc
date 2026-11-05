@@ -5,14 +5,18 @@ y se devuelve el Excel de resultados. La autenticación la aplica el middleware 
 de main.py a todo lo que cuelga de /api/.
 """
 
+import logging
 from io import BytesIO
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from core import awareness_flex
+from .ratelimit import limit_by_user
 from .services import _read_dataframe, excel_sheets
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/awareness-flex", tags=["awareness-independiente"])
 
@@ -26,6 +30,7 @@ def _config_or_400(raw):
     try:
         return awareness_flex.parse_config(raw)
     except Exception as exc:
+        logger.info("Configuración de Awareness no válida: %s", exc)
         raise HTTPException(400, f"Configuración no válida: {exc}") from exc
 
 
@@ -49,7 +54,7 @@ def validate_columns(request: ValidateRequest):
     return {"rows": awareness_flex.detect_columns(request.columns, config)}
 
 
-@router.post("/suggest")
+@router.post("/suggest", dependencies=[Depends(limit_by_user("awareness-suggest", 40, 600))])
 async def suggest_brands(file: UploadFile = File(...), config: str = Form(...), sheet: str = Form("")):
     """Propone la lista de marcas a partir de las respuestas (agrupa las escritas parecido)."""
     cfg = _config_or_400(config)
@@ -58,10 +63,11 @@ async def suggest_brands(file: UploadFile = File(...), config: str = Form(...), 
     try:
         return awareness_flex.suggest_entities(frame, cfg)
     except Exception as exc:
+        logger.exception("Fallo en Awareness independiente")
         raise HTTPException(400, f"No se pudo proponer marcas: {exc}") from exc
 
 
-@router.post("/preview")
+@router.post("/preview", dependencies=[Depends(limit_by_user("awareness-preview", 40, 600))])
 async def preview_awareness(file: UploadFile = File(...), config: str = Form(...), sheet: str = Form("")):
     cfg = _config_or_400(config)
     raw = await file.read()
@@ -69,10 +75,11 @@ async def preview_awareness(file: UploadFile = File(...), config: str = Form(...
     try:
         return awareness_flex.preview_results(frame, cfg)
     except Exception as exc:
+        logger.exception("Fallo en Awareness independiente")
         raise HTTPException(400, f"No se pudo calcular la vista previa: {exc}") from exc
 
 
-@router.post("/report")
+@router.post("/report", dependencies=[Depends(limit_by_user("awareness-report", 40, 600))])
 async def build_report(file: UploadFile = File(...), config: str = Form(...), sheet: str = Form("")):
     cfg = _config_or_400(config)
     raw = await file.read()
@@ -80,6 +87,7 @@ async def build_report(file: UploadFile = File(...), config: str = Form(...), sh
     try:
         workbook = awareness_flex.generate_report(frame, cfg)
     except Exception as exc:
+        logger.exception("Fallo en Awareness independiente")
         raise HTTPException(400, f"No se pudo generar el reporte: {exc}") from exc
     return StreamingResponse(
         BytesIO(workbook),

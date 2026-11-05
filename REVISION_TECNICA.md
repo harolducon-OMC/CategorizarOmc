@@ -11,9 +11,8 @@ Se escanearon los objetos Git incluidos buscando patrones comunes de credenciale
 La base ya contiene un flujo completo de importación, categorización, revisión, Dashboard y dos modos de Awareness. Se añadieron estos cambios:
 
 - **Asistente de la plataforma:** botón flotante disponible en las pantallas autenticadas. Explica el uso de la plataforma con el modelo/proveedor seleccionado; algunas preguntas frecuentes (por ejemplo, dónde guardar o cambiar una API key) tienen respuesta local aun sin clave. El chat no persiste su historial.
-- **Descargas de Awareness:** PNG por gráfico y CSV por tabla, disponibles para cada perfil tanto en el módulo independiente como en el integrado. Los CSV incluyen conteos y porcentajes; el reporte Excel existente se conserva.
-- **Insight TOM:** botón por análisis que compara la marca con más menciones TOM entre las evaluadas con la mención más frecuente fuera del catálogo. El cálculo se basa en las respuestas originales, agrupa variantes parecidas y muestra esas menciones externas como candidatas para revisión, no como marcas confirmadas.
-- **Documentación y pruebas:** se describió el comportamiento agregado y se añadieron pruebas para el asistente y la comparación TOM.
+- **Descargas de Awareness:** gráfico y tabla como imagen PNG, disponibles para cada perfil tanto en el módulo independiente como en el integrado. El reporte Excel existente se conserva.
+- **Documentación y pruebas:** se describió el comportamiento agregado y se añadieron pruebas para el asistente.
 - **Aislamiento de estudios:** cada estudio nuevo se crea con `owner_id`; las consultas de estudios y las rutas de clasificaciones filtran por ese dueño y responden 404 cuando otra cuenta intenta acceder. No hace falta una tabla nueva: la migración agrega `studies.owner_id` con una clave foránea a `users.id`.
 
 ## Hallazgos que conviene resolver

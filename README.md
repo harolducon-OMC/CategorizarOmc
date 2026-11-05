@@ -20,7 +20,7 @@ Primera migración local de la Plataforma de Insights. Mantiene en Python la ló
 - Navegación de preguntas con estado pendiente/borrador/lista; al completar una pregunta puedes pasar a la siguiente sin perder los resultados anteriores.
 - Selector desplegable de proveedor, modelo y clave temporal de sesión en la barra superior; la gestión persistente de claves se encuentra en Ajustes.
 - Módulo Awareness autónomo basado en la aplicación Streamlit original: carga directamente CSV/XLSX, ofrece modos Bancos, Conglomerados y Personalizado, configura entidades, alias, normalizaciones, preguntas y demográficos, valida columnas y exporta el reporte Excel sin depender de un estudio ni del flujo de categorización. Corre como servicio separado en el puerto 8501.
-- En ambos modos de Awareness se pueden descargar por separado el gráfico como PNG y la tabla como CSV. El botón **Generar insight TOM** compara la marca con más recordación entre las evaluadas con la mención más frecuente fuera del catálogo; las marcas externas son candidatas agrupadas automáticamente y deben revisarse antes de añadirlas.
+- En ambos modos de Awareness se pueden descargar por separado el gráfico y la tabla como imágenes PNG (con etiquetas de marca y porcentajes); el reporte Excel se conserva.
 - API documentada automáticamente en `http://localhost:8000/docs`.
 
 El acceso requiere login y el registro limita el correo al dominio configurado. Los tokens de acceso JWT expiran según `ACCESS_TOKEN_MINUTES`. La clasificación por diccionario se combina con el clasificador LLM actual. Las llamadas largas de IA se procesan en la petición actual; para despliegue multiusuario conviene añadir worker/cola, auditoría y almacenamiento de archivos más robusto.
@@ -171,3 +171,44 @@ Las pruebas de marcas, diccionario, sentimiento e importación no requieren cred
 ## Notas de seguridad
 
 La configuración está pensada para desarrollo local. **No publiques estos puertos ni despliegues la aplicación directamente en Internet.** Todas las rutas `/api` excepto salud, registro e inicio de sesión requieren `Authorization: Bearer <JWT>`. El token se guarda en `sessionStorage`, se expira y el password se almacena con hash Argon2. El backend filtra los estudios por propietario; aun así, antes de un despliegue real se recomienda HTTPS, limitación de intentos de login, registros de auditoría, backups y endurecimiento del CORS. Una API key escrita en Ajustes no persiste, pero sí se envía desde el navegador a la API y luego al proveedor seleccionado.
+
+## Calidad, seguridad y operación
+
+### Pruebas y CI
+- `backend`: `python -m unittest discover -s tests -v` (instala antes `pip install -r requirements-dev.txt`).
+- `frontend`: `npm run build` revisa tipos y compila.
+- GitHub Actions (`.github/workflows/ci.yml`) corre ambas cosas en cada push y pull request. Activa en GitHub la protección de `main` para exigir que pase antes de fusionar.
+
+### Límites de peticiones (rate limiting)
+Responden `429` con la cabecera `Retry-After`. Son en memoria y por instancia (suficiente con un solo servicio en Render).
+
+| Ruta | Límite |
+|---|---|
+| Inicio de sesión | 8 intentos / 5 min por correo y 60 / 5 min por IP |
+| Registro | 10 / hora por IP |
+| Chat de ayuda (Insy) | 20 / min por usuario |
+| Clasificar / insights con IA | 10 / 10 min por usuario |
+| Proponer categorías | 15 / 10 min por usuario |
+| Cargar estudio / hojas | 20 y 30 / 10 min por usuario |
+| Awareness independiente (marcas, vista previa, reporte) | 40 / 10 min por usuario |
+
+Para desactivarlos en local: `RATE_LIMIT_DISABLED=1`. Los números están en `app/routers/*.py` y `app/awareness_flex.py`.
+
+### Registros (logs) y Sentry
+- Cada petición recibe un `X-Request-ID` (también aparece en los logs y en el JSON de los errores 500) para rastrear un problema.
+- Las peticiones que tardan más de `SLOW_REQUEST_SECONDS` (5 por defecto) y los errores 5xx se registran.
+- Para recibir los errores por correo: crea un proyecto gratuito en sentry.io (plataforma Python/FastAPI) y define `SENTRY_DSN` en Render. Sin DSN no se envía nada. Se filtran el token, las claves de IA y los cuerpos de las peticiones.
+
+### Migraciones con Alembic
+Desde `backend/`:
+- **Base ya en uso (Neon/Render actual):** una sola vez, `alembic stamp head`. No ejecutes `upgrade` en esa base.
+- **Base nueva:** `alembic upgrade head`.
+- **Cambiar tablas o columnas:** edita `app/models.py`, corre `alembic revision --autogenerate -m "descripción"`, revisa el archivo generado y aplica `alembic upgrade head` antes de desplegar el código nuevo.
+- Con el esquema bajo Alembic, puedes poner `AUTO_CREATE_TABLES=0` para que la API no cree tablas al arrancar.
+
+### Dependencias
+`backend/requirements.txt` fija las versiones directas; `requirements.lock.txt` es la instantánea completa del entorno donde se probó. Para actualizar: sube una librería, corre las pruebas y confirma.
+
+### Estructura del código
+- Backend: `app/main.py` (middleware y arranque), `app/routers/` (auth, system, studies, classifications, study_awareness), `app/awareness_flex.py` (Awareness independiente), `app/common.py` (serializadores compartidos), `app/ratelimit.py`, `app/observability.py`.
+- Frontend: `src/App.tsx` (navegación y sesión), `src/pages/` (una pantalla por archivo), `src/components/common.tsx`, `src/api.ts`, `src/types.ts`, `src/ErrorBoundary.tsx`.
