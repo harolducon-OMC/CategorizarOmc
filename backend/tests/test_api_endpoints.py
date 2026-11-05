@@ -24,7 +24,12 @@ except ImportError:  # pragma: no cover - entorno sin dependencias de la API
     API_AVAILABLE = False
 
 SECRET = "t" * 64
-PUBLIC_PATHS = {"/api/health", "/api/auth/register", "/api/auth/login"}
+PUBLIC_PATHS = {
+    "/api/health",
+    "/api/auth/register",
+    "/api/auth/login",
+    "/api/telemetry/vitals",  # métricas web del navegador: pública a propósito (sendBeacon no envía token)
+}
 # Rutas de documentación autogeneradas por FastAPI: son públicas por diseño.
 DOCS_PATHS = {"/docs", "/docs/oauth2-redirect", "/redoc", "/openapi.json"}
 HTTP_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE"}
