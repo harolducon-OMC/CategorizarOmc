@@ -56,16 +56,16 @@ class ApiHttpLayerTests(unittest.TestCase):
 
     def test_every_private_route_requires_a_token(self):
         from fastapi.routing import APIRoute
-        from starlette.routing import Mount
+        from starlette.routing import Route, Mount
 
         checked = 0
 
         def collect_and_test(routes):
             nonlocal checked
             for route in routes:
-                if isinstance(route, APIRoute):
+                if isinstance(route, (APIRoute, Route)):
                     path = getattr(route, "path", "")
-                    if not path.startswith("/api/") or path in PUBLIC_PATHS:
+                    if not path or not path.startswith("/") or path in PUBLIC_PATHS or path in {"/docs", "/redoc", "/openapi.json"}:
                         continue
                     for method in sorted(set(route.methods or []) - {"HEAD", "OPTIONS"}):
                         url = re.sub(r"\{[^}]+\}", "x", path)
