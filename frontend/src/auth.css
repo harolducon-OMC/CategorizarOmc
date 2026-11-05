@@ -1,0 +1,143 @@
+/* Login de Insights Studio (tema claro). Todas las clases llevan prefijo ix- para no chocar con styles.css */
+
+.ix-shell {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 12px;
+  background: #f5f8fc;
+}
+
+.ix-card {
+  display: grid;
+  grid-template-columns: 1fr;
+  width: 100%;
+  max-width: 1040px;
+  overflow: hidden;
+  border-radius: 24px;
+  background: #fff;
+  border: 1px solid #e3e9f4;
+  box-shadow: 0 24px 60px rgba(30, 50, 100, 0.1);
+}
+
+/* ---------- Panel informativo ---------- */
+.ix-aside {
+  display: none;
+  position: relative;
+  flex-direction: column;
+  justify-content: space-between;
+  overflow: hidden;
+  padding: 40px;
+  background: #eef3fd;
+  border-right: 1px solid #e3e9f4;
+  color: #1e2a44;
+}
+.ix-glow { position: absolute; width: 288px; height: 288px; border-radius: 50%; filter: blur(64px); pointer-events: none; }
+.ix-glow-a { left: -96px; top: -96px; background: rgba(47, 90, 223, 0.12); }
+.ix-glow-b { right: -80px; bottom: -112px; background: rgba(47, 90, 223, 0.08); }
+.ix-aside-body { position: relative; }
+
+.ix-brand { display: flex; align-items: center; gap: 12px; }
+.ix-brand-mark {
+  display: flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px; border-radius: 12px;
+  background: #dfe9fb; color: #2f5adf;
+}
+.ix-brand-name { margin: 0; font-size: 19px; font-weight: 700; line-height: 1.1; letter-spacing: -0.01em; color: #1e2a44; }
+.ix-brand-sub { margin: 2px 0 0; font-size: 9px; font-weight: 600; letter-spacing: 0.28em; color: #6b7a99; }
+
+.ix-headline { margin: 36px 0 0; font-size: 30px; font-weight: 700; line-height: 1.15; letter-spacing: -0.02em; color: #1e2a44; }
+.ix-lead { margin: 12px 0 0; max-width: 420px; font-size: 14px; line-height: 1.6; color: #5d6b88; }
+
+.ix-steps { list-style: none; margin: 28px 0 0; padding: 0; display: grid; gap: 10px; }
+.ix-step {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 11px 16px; border-radius: 14px;
+  border: 1px solid #dfe7f5;
+  background: #fff;
+}
+.ix-step-icon {
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 36px; height: 36px; border-radius: 12px;
+  background: #e8effc; color: #2f5adf;
+}
+.ix-step h3 { margin: 0; font-size: 14px; font-weight: 600; color: #1e2a44; }
+.ix-step p { margin: 2px 0 0; font-size: 12px; line-height: 1.5; color: #6b7a99; }
+.ix-step-n { margin-right: 8px; font-size: 11px; font-weight: 700; color: #2f5adf; }
+
+/* ---------- Formulario ---------- */
+.ix-formwrap { padding: 0; }
+.ix-form {
+  display: flex; flex-direction: column; justify-content: center;
+  height: 100%; box-sizing: border-box;
+  padding: 32px 24px; background: #fff; color: #1e2a44;
+}
+
+.ix-robot { width: 176px; margin: 0 auto 8px; }
+.ix-robot svg { display: block; width: 100%; height: auto; }
+
+.ix-title { text-align: center; }
+.ix-title h1 { margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -0.01em; color: #1e2a44; }
+.ix-title p { margin: 6px auto 0; max-width: 300px; font-size: 13px; line-height: 1.5; color: #6b7a99; }
+
+.ix-fields { margin-top: 22px; display: grid; gap: 6px; }
+.ix-label { margin-top: 8px; font-size: 12px; font-weight: 600; color: #4a5878; }
+.ix-label:first-child { margin-top: 0; }
+
+.ix-input {
+  width: 100%; box-sizing: border-box;
+  padding: 11px 12px; border-radius: 10px;
+  border: 1px solid #d6e0f5; background: #e8effc;
+  font: inherit; font-size: 14px; font-weight: 500; color: #14213d;
+  outline: none; transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+}
+.ix-input::placeholder { color: #8a96b0; font-weight: 400; }
+.ix-input:focus { background: #fff; border-color: #2f5adf; box-shadow: 0 0 0 3px rgba(47, 90, 223, 0.16); }
+.ix-input:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.ix-pass { position: relative; }
+.ix-pass .ix-input { padding-right: 40px; }
+.ix-eye {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  display: flex; padding: 6px; border: 0; border-radius: 8px;
+  background: transparent; color: #6b7a99; cursor: pointer;
+}
+.ix-eye:hover { background: #d6e0f5; color: #1e2a44; }
+.ix-eye:focus-visible { outline: 2px solid #2f5adf; outline-offset: 1px; }
+
+.ix-error {
+  margin: 16px 0 0; padding: 10px 12px; border-radius: 10px;
+  background: #fdecec; color: #b42318; font-size: 12px;
+}
+
+.ix-submit {
+  margin-top: 22px; width: 100%; padding: 12px 16px;
+  border: 0; border-radius: 10px;
+  background: #2f5adf; color: #fff;
+  font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+  box-shadow: 0 8px 18px rgba(47, 90, 223, 0.28);
+  transition: background 0.15s;
+}
+.ix-submit:hover:not(:disabled) { background: #2548c0; }
+.ix-submit:focus-visible, .ix-switch:focus-visible { outline: 2px solid #1e2a44; outline-offset: 2px; }
+.ix-submit:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.ix-switch {
+  margin-top: 10px; padding: 6px; border: 0; background: transparent;
+  font: inherit; font-size: 13px; color: #2f5adf; cursor: pointer;
+}
+.ix-switch:hover { text-decoration: underline; }
+
+.ix-note { margin-top: 14px; text-align: center; font-size: 11px; line-height: 1.5; color: #8a96b0; }
+
+/* ---------- Escritorio ---------- */
+@media (min-width: 960px) {
+  .ix-card { grid-template-columns: 1.05fr 0.95fr; }
+  .ix-aside { display: flex; }
+  .ix-form { padding: 40px 44px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ix-input, .ix-submit { transition: none; }
+}
