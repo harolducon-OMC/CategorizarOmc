@@ -55,16 +55,30 @@ class ApiHttpLayerTests(unittest.TestCase):
         self.assertTrue(response.headers.get("X-Request-ID"))
 
     def test_every_private_route_requires_a_token(self):
+        from fastapi.routing import APIRoute
+        from starlette.routing import Mount
+
         checked = 0
-        for route in app.routes:
-            path = getattr(route, "path", "")
-            if not path.startswith("/api/") or path in PUBLIC_PATHS:
-                continue
-            for method in sorted(set(route.methods or []) - {"HEAD", "OPTIONS"}):
-                url = re.sub(r"\{[^}]+\}", "x", path)
-                response = self.client.request(method, url)
-                self.assertEqual(response.status_code, 401, f"{method} {path} debería exigir token")
-                checked += 1
+
+        def collect_and_test(routes):
+            nonlocal checked
+            for route in routes:
+                if isinstance(route, APIRoute):
+                    path = getattr(route, "path", "")
+                    if not path.startswith("/api/") or path in PUBLIC_PATHS:
+                        continue
+                    for method in sorted(set(route.methods or []) - {"HEAD", "OPTIONS"}):
+                        url = re.sub(r"\{[^}]+\}", "x", path)
+                        response = self.client.request(method, url)
+                        self.assertEqual(
+                            response.status_code, 401,
+                            f"{method} {path} debería exigir token"
+                        )
+                        checked += 1
+                elif isinstance(route, Mount) and hasattr(route, "routes"):
+                    collect_and_test(route.routes)
+
+        collect_and_test(app.routes)
         self.assertGreater(checked, 25)
 
     def test_invalid_token_is_rejected(self):
