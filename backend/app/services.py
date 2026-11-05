@@ -1,6 +1,7 @@
 import io
 import json
 import pandas as pd
+from .cache import MAX_CACHED_CELLS, MISSING, frame_cache
 from fastapi import HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -91,10 +92,21 @@ def create_study(
 
 
 def dataframe_for_study(db: Session, study: Study) -> pd.DataFrame:
-    rows = db.scalars(
-        select(Respondent).where(Respondent.study_id == study.id).order_by(Respondent.row_index)
+    """Datos del estudio como DataFrame. Se cachea en memoria: las respuestas no cambian tras la carga.
+
+    Siempre devuelve una copia, así que los endpoints pueden modificarla sin afectar el caché.
+    """
+    key = f"{study.id}:{study.row_count}"
+    cached = frame_cache.get(key)
+    if cached is not MISSING:
+        return cached.copy()
+    rows = db.scalars(  # solo la columna JSON: evita construir un objeto ORM por fila
+        select(Respondent.data).where(Respondent.study_id == study.id).order_by(Respondent.row_index)
     ).all()
-    return pd.DataFrame([row.data for row in rows], columns=study.columns)
+    frame = pd.DataFrame(rows, columns=study.columns)
+    if frame.size <= MAX_CACHED_CELLS:
+        frame_cache.set(key, frame)
+    return frame.copy()
 
 
 def get_study(db: Session, study_id: str, owner_id: str) -> Study:

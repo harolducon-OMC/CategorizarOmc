@@ -11,3 +11,7 @@ build/
 .idea/
 *.sql
 !backend/migrations/*.sql
+
+.venv/
+__pycache__/
+*.pyc

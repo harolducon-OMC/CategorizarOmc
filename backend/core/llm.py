@@ -85,7 +85,7 @@ class LLM:
                 response = requests.post(
                     "https://api.cohere.ai/v2/chat", json=payload,
                     headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
-                    timeout=120,
+                    timeout=(10, 120),  # (conectar, leer)
                 )
                 if response.status_code >= 400:
                     raise _ProviderHTTPError(response.status_code)
@@ -118,6 +118,41 @@ class LLM:
             status = getattr(exc, "status_code", None)
             detail = _api_error_detail(exc, self.api_key)
             raise LLMError(_friendly_api_error(self.provider, status, model_name, detail)) from exc
+
+    def stream_text(self, system: str, user: str, model: Optional[str] = None,
+                    max_tokens: int = 2000, temperature: Optional[float] = 0.0):
+        """Genera la respuesta token a token: generador de fragmentos de texto."""
+        model_name = model or self.fast
+        if self.provider == "anthropic":
+            kwargs = {"model": model_name, "max_tokens": max_tokens, "system": system,
+                      "messages": [{"role": "user", "content": user}]}
+            if temperature is not None:
+                kwargs["temperature"] = temperature
+            try:
+                with self.client.messages.stream(**kwargs) as stream:
+                    for piece in stream.text_stream:
+                        if piece:
+                            yield piece
+                return
+            except self._anthropic.APIError as exc:
+                raise LLMError(_friendly_api_error(self.provider, getattr(exc, "status_code", None), model_name)) from exc
+        if self.provider == "cohere":  # sin streaming nativo en esta integración: respuesta completa
+            yield self.text(system, user, model=model_name, max_tokens=max_tokens, temperature=temperature)
+            return
+        kwargs = {"model": model_name, "max_tokens": max_tokens, "stream": True,
+                  "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
+        if temperature is not None and not (self.provider == "gemini" and model_name.startswith("gemini-3")):
+            kwargs["temperature"] = temperature
+        try:
+            for chunk in self.client.chat.completions.create(**kwargs):
+                if not chunk.choices:
+                    continue
+                piece = chunk.choices[0].delta.content
+                if piece:
+                    yield piece
+        except Exception as exc:
+            status = getattr(exc, "status_code", None)
+            raise LLMError(_friendly_api_error(self.provider, status, model_name, _api_error_detail(exc, self.api_key))) from exc
 
     def json(self, system: str, user: str, model: Optional[str] = None, max_tokens: int = 2000) -> Any:
         """Pide JSON y reintenta una vez si la salida no se puede parsear."""

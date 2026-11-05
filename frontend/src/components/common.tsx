@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { ArrowRight, FolderOpen } from 'lucide-react'
 
 export function NavButton({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string }) {
@@ -12,7 +13,7 @@ export function MetricCard({ icon, label, value, sub, color }: { icon: React.Rea
   return <div className="metric-card"><div className={`metric-icon ${color}`}>{icon}</div><div><span>{label}</span><strong>{value}</strong><small>{sub}</small></div></div>
 }
 
-export function DataTable({ columns, rows }: { columns: string[]; rows: Record<string, any>[] }) {
+function DataTableBase({ columns, rows }: { columns: string[]; rows: Record<string, any>[] }) {
   if (!rows.length) return <div className="empty-inline">Sin filas para mostrar.</div>
   return <div className="table-scroll"><table><thead><tr>{columns.slice(0, 8).map((c) => <th key={c}>{c}</th>)}</tr></thead><tbody>{rows.slice(0, 8).map((row, i) => <tr key={i}>{columns.slice(0, 8).map((c) => <td key={c}>{String(row[c] ?? '—').slice(0, 90)}</td>)}</tr>)}</tbody></table></div>
 }
@@ -20,3 +21,5 @@ export function DataTable({ columns, rows }: { columns: string[]; rows: Record<s
 export function EmptyState({ title, text, action }: { title: string; text: string; action: string }) {
   return <div className="empty-state"><div className="empty-state-mark"><FolderOpen size={25} /></div><h2>{title}</h2><p>{text}</p><a href="/" className="button-secondary">{action} <ArrowRight size={15} /></a></div>
 }
+
+export const DataTable = memo(DataTableBase)

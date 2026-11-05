@@ -59,3 +59,37 @@ def init_sentry() -> bool:
         before_send=scrub_event,
     )
     return True
+
+
+def init_tracing(app, engine=None) -> bool:
+    """Trazas con OpenTelemetry (peticiones y consultas SQL lentas). Opcional.
+
+    Se activa solo si defines OTEL_EXPORTER_OTLP_ENDPOINT (y OTEL_EXPORTER_OTLP_HEADERS si tu
+    proveedor lo pide, p. ej. Grafana Cloud o Honeycomb) y se instalaron las librerías de
+    requirements-optional.txt.
+    """
+    if not os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "").strip():
+        return False
+    log = logging.getLogger(__name__)
+    try:
+        from opentelemetry import trace
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+        from opentelemetry.sdk.resources import Resource
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    except ImportError:
+        log.warning("OTEL_EXPORTER_OTLP_ENDPOINT definido pero faltan librerías: pip install -r requirements-optional.txt")
+        return False
+    provider = TracerProvider(resource=Resource.create({"service.name": os.getenv("OTEL_SERVICE_NAME", "insights-api")}))
+    provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))  # lee endpoint y cabeceras de las variables OTEL_*
+    trace.set_tracer_provider(provider)
+    FastAPIInstrumentor.instrument_app(app, excluded_urls="api/health,api/telemetry")
+    if engine is not None:
+        try:
+            from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
+
+            SQLAlchemyInstrumentor().instrument(engine=engine)
+        except ImportError:
+            log.info("Sin instrumentación de SQLAlchemy; solo se trazan las peticiones.")
+    return True

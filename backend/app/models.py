@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .db import Base
@@ -7,6 +7,7 @@ from .db import Base
 
 class Study(Base):
     __tablename__ = "studies"
+    __table_args__ = (Index("ix_studies_owner_created", "owner_id", "created_at"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     owner_id: Mapped[str] = mapped_column(
@@ -43,7 +44,10 @@ class Respondent(Base):
 
 class Classification(Base):
     __tablename__ = "classifications"
-    __table_args__ = (UniqueConstraint("study_id", "question", name="uq_classification_study_question"),)
+    __table_args__ = (
+        UniqueConstraint("study_id", "question", name="uq_classification_study_question"),
+        Index("ix_classifications_study_updated", "study_id", "updated_at"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     study_id: Mapped[str] = mapped_column(ForeignKey("studies.id", ondelete="CASCADE"), index=True)

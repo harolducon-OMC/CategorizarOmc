@@ -12,12 +12,13 @@ from dotenv import load_dotenv
 load_dotenv()  # lee el .env de la raíz también cuando Uvicorn se lanza desde backend/
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 
 from .awareness_flex import router as awareness_flex_router
 from .common import _class_or_404, _labels_without_blank_responses, get_current_user_id  # noqa: F401  (compatibilidad con pruebas e importaciones previas)
 from .db import Base, engine
-from .observability import init_sentry, request_id_ctx, setup_logging
+from .observability import init_sentry, init_tracing, request_id_ctx, setup_logging
 from .routers import auth, classifications, study_awareness, studies, system
 from .security import token_subject, validate_security_config
 
@@ -35,7 +36,7 @@ async def security_middleware(request: Request, call_next):
     request_id_ctx.set(request_id)
     started = time.monotonic()
     path = request.url.path
-    public = path in {"/api/health", "/api/auth/register", "/api/auth/login"} or path.startswith("/docs") or path.startswith("/openapi.json") or path.startswith("/redoc")
+    public = path in {"/api/health", "/api/auth/register", "/api/auth/login", "/api/telemetry/vitals"} or path.startswith("/docs") or path.startswith("/openapi.json") or path.startswith("/redoc")
     if path.startswith("/api/") and request.method != "OPTIONS" and not public:
         auth_header = request.headers.get("Authorization", "")
         scheme, _, token = auth_header.partition(" ")
@@ -67,6 +68,7 @@ async def unhandled_error(request: Request, exc: Exception):
     )
 
 
+init_tracing(app, engine)
 app.include_router(awareness_flex_router)
 for _router_module in (auth, system, studies, classifications, study_awareness):
     app.include_router(_router_module.router)
@@ -74,6 +76,8 @@ for _router_module in (auth, system, studies, classifications, study_awareness):
 
 CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",") if o.strip()]
 
+# Comprime respuestas JSON grandes (los .xlsx y el streaming de IA se envían con Content-Encoding: identity)
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,

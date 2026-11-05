@@ -201,7 +201,7 @@ Para desactivarlos en local: `RATE_LIMIT_DISABLED=1`. Los números están en `ap
 
 ### Migraciones con Alembic
 Desde `backend/`:
-- **Base ya en uso (Neon/Render actual):** una sola vez, `alembic stamp head`. No ejecutes `upgrade` en esa base.
+- **Base ya en uso (Neon/Render actual):** una sola vez, `alembic stamp 0001_baseline` y después `alembic upgrade head` (crea los índices nuevos). No ejecutes `upgrade` antes del `stamp`.
 - **Base nueva:** `alembic upgrade head`.
 - **Cambiar tablas o columnas:** edita `app/models.py`, corre `alembic revision --autogenerate -m "descripción"`, revisa el archivo generado y aplica `alembic upgrade head` antes de desplegar el código nuevo.
 - Con el esquema bajo Alembic, puedes poner `AUTO_CREATE_TABLES=0` para que la API no cree tablas al arrancar.
@@ -212,3 +212,28 @@ Desde `backend/`:
 ### Estructura del código
 - Backend: `app/main.py` (middleware y arranque), `app/routers/` (auth, system, studies, classifications, study_awareness), `app/awareness_flex.py` (Awareness independiente), `app/common.py` (serializadores compartidos), `app/ratelimit.py`, `app/observability.py`.
 - Frontend: `src/App.tsx` (navegación y sesión), `src/pages/` (una pantalla por archivo), `src/components/common.tsx`, `src/api.ts`, `src/types.ts`, `src/ErrorBoundary.tsx`.
+
+## Rendimiento
+
+**Qué se aplicó**
+- **Frontend:** skeletons de carga (`components/Skeleton.tsx`), pantallas cargadas bajo demanda (`React.lazy`) y librerías separadas en archivos propios (`vite.config.ts`), llamadas GET duplicadas unificadas (`api.ts`, `http.ts`), guardado de etiquetas y borrado de estudios optimistas (se revierten si el servidor falla), tablas largas con `content-visibility`, `DataTable` memoizada y fuentes cargadas con `preconnect` y solo los grosores usados.
+- **Streaming de IA:** el asistente Insy escribe la respuesta token a token (`POST /api/help/chat/stream`, eventos SSE). Anthropic y los proveedores compatibles con OpenAI transmiten; Cohere responde completo.
+- **Backend:** compresión gzip, DataFrames de estudios en caché (antes se reconstruían desde PostgreSQL en cada consulta), frecuencias y segmentos cacheados (Redis si defines `REDIS_URL`, memoria si no), listados sin las columnas pesadas (`labels`, `brand_mapping`), valores de columna leídos directamente del JSON, paginación (`limit` y `offset`) en estudios y clasificaciones, pool de conexiones configurable (`DB_POOL_*`), índices compuestos (migración `0002`) y tiempo de espera de conexión separado en las llamadas a Cohere.
+- **Medición:** Core Web Vitals de usuarios reales en los logs del backend (logger `insights.vitals`), trazas OpenTelemetry opcionales (`OTEL_EXPORTER_OTLP_ENDPOINT` + `requirements-optional.txt`) y un chequeo Lighthouse móvil informativo en CI.
+- **Caché del navegador:** `vercel.json` marca `/assets/*` como inmutable (Vite les pone hash), y Vercel ya los sirve desde su CDN con Brotli.
+
+**Qué no aplica (todavía) a este proyecto**
+- Imágenes WebP/AVIF y `loading="lazy"`: la aplicación no tiene imágenes. Si agregas alguna, usa WebP/AVIF y `loading="lazy"`.
+- Debounce de búsqueda y autocompletado: no hay cajas de búsqueda; la validación de columnas de Awareness ya espera antes de consultar.
+- N+1: se revisaron todas las rutas y no hay consultas en bucle; el gasto real era recargar el estudio completo en cada consulta (ya resuelto con caché).
+- Dependencias sin usar: todas se usan (se verificó en el código).
+- Renderizado en servidor: la app está tras un inicio de sesión; no ayuda y añade complejidad.
+- Virtualización completa de listas: las tablas ya se paginan (100 a 300 filas) y reciben `content-visibility`. Si llegas a mostrar miles de filas a la vez, agrega `@tanstack/react-virtual`.
+- Scripts de terceros: no hay ninguno.
+
+**Pendiente (requiere infraestructura o decisión tuya)**
+- **Cola de tareas para clasificar con IA:** lo correcto es un worker aparte con Redis (RQ, Celery o Arq) y que la pantalla consulte el progreso. Es un cambio de arquitectura y de flujo, no un ajuste.
+- **Varias instancias:** necesitan `REDIS_URL` (caché compartida) y mover el limitador de peticiones a Redis.
+- **Región:** pon el servicio de Render en la misma región que la base de Neon (la diferencia se nota en cada consulta).
+- **Fuentes propias:** `npm i @fontsource-variable/dm-sans @fontsource-variable/manrope` e importarlas en `main.tsx`, para quitar la dependencia de Google Fonts.
+- **Probar en celulares y redes lentas:** Chrome DevTools, pestaña Rendimiento, con «Slow 4G» y CPU 4x más lenta; o Lighthouse en modo móvil.

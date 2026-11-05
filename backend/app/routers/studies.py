@@ -11,7 +11,7 @@ from io import BytesIO
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 
 from core import coding, export
 from ..common import _classification_json, _draft_json, _study_json, get_current_user_id
@@ -33,10 +33,12 @@ async def upload_sheets(file: UploadFile = File(...)):
 
 @router.get("/api/studies")
 def list_studies(
+    limit: int = 200, offset: int = 0,
     db: Session = Depends(get_db), owner_id: str = Depends(get_current_user_id),
 ):
     studies = db.scalars(
         select(Study).where(Study.owner_id == owner_id).order_by(Study.created_at.desc())
+        .limit(max(1, min(limit, 500))).offset(max(offset, 0))
     ).all()
     return [_study_json(study) for study in studies]
 
@@ -59,7 +61,8 @@ def get_study_detail(
     owner_id: str = Depends(get_current_user_id),
 ):
     study = get_study(db, study_id, owner_id)
-    classifications = db.scalars(select(Classification).where(Classification.study_id == study_id)).all()
+    classifications = db.scalars(select(Classification).where(Classification.study_id == study_id)
+                                .options(defer(Classification.labels), defer(Classification.brand_mapping))).all()
     return {**_study_json(study), "classifications": [_classification_json(item) for item in classifications]}
 
 
@@ -85,7 +88,9 @@ def study_overview(
         **_study_json(study),
         "suggested_questions": coding.suggest_open_columns(frame),
         "classifications": [_classification_json(item) for item in db.scalars(
-            select(Classification).where(Classification.study_id == study_id).order_by(Classification.updated_at.desc())
+            select(Classification).where(Classification.study_id == study_id)
+            .options(defer(Classification.labels), defer(Classification.brand_mapping))
+            .order_by(Classification.updated_at.desc())
         ).all()],
         "preview": json.loads(frame.head(8).to_json(orient="records", date_format="iso", force_ascii=False)),
     }
@@ -168,11 +173,11 @@ def study_column_values(
     study = get_study(db, study_id, owner_id)
     if column not in study.columns:
         raise HTTPException(400, "La columna no existe en este estudio.")
-    rows = db.scalars(select(Respondent).where(Respondent.study_id == study_id)
-                      .order_by(Respondent.row_index)).all()
-    values = list(dict.fromkeys(
-        str(row.data.get(column) if row.data.get(column) is not None else "Sin dato") for row in rows
-    ))
+    cells = db.scalars(  # solo la clave pedida del JSON, no la fila completa
+        select(Respondent.data[column].as_string()).where(Respondent.study_id == study_id)
+        .order_by(Respondent.row_index)
+    ).all()
+    values = list(dict.fromkeys(cell if cell is not None else "Sin dato" for cell in cells))
     return {"values": values[:1000]}
 
 
@@ -201,5 +206,5 @@ def export_study_categorizations(
     return StreamingResponse(
         BytesIO(workbook),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": f'attachment; filename="{filename}"', "Content-Encoding": "identity"},
     )

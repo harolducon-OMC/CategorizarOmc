@@ -92,5 +92,5 @@ async def build_report(file: UploadFile = File(...), config: str = Form(...), sh
     return StreamingResponse(
         BytesIO(workbook),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": 'attachment; filename="Reporte_Awareness_Estructural.xlsx"'},
+        headers={"Content-Disposition": 'attachment; filename="Reporte_Awareness_Estructural.xlsx"', "Content-Encoding": "identity"},
     )

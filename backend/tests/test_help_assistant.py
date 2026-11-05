@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from core.help_assistant import HELP_SYSTEM, answer_question, answer_without_model
+from core.help_assistant import HELP_SYSTEM, answer_question, answer_without_model, stream_answer
 
 
 class FakeLLM:
@@ -48,6 +48,27 @@ class HelpAssistantTests(unittest.TestCase):
         self.assertIsNone(answer_without_model([
             {"role": "user", "content": "¿Qué modelo se usó en mi última encuesta?"},
         ]))
+
+
+    def test_stream_answer_yields_fragments_in_order(self):
+        class FakeLLM:
+            smart = "m"
+
+            def stream_text(self, system, user, **kwargs):
+                yield from ["Hola", ", ", "mundo"]
+
+        pieces = list(stream_answer(FakeLLM(), [{"role": "user", "content": "¿Qué es Awareness?"}]))
+        self.assertEqual("".join(pieces), "Hola, mundo")
+
+    def test_stream_answer_has_fallback_when_model_returns_nothing(self):
+        class EmptyLLM:
+            smart = "m"
+
+            def stream_text(self, system, user, **kwargs):
+                return iter(())
+
+        pieces = list(stream_answer(EmptyLLM(), [{"role": "user", "content": "hola"}]))
+        self.assertIn("No pude preparar", pieces[0])
 
 
 if __name__ == "__main__":

@@ -11,9 +11,10 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Form, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 
 from core import brands, coding, export, insights
+from ..cache import result_cache
 from ..common import (_api_key_for_user, _class_or_404, _classification_json,
                       _labels_without_blank_responses, get_current_user_id)
 from ..db import get_db
@@ -139,12 +140,14 @@ def classify_question(
 
 @router.get("/api/studies/{study_id}/classifications")
 def list_classifications(
-    study_id: str, db: Session = Depends(get_db),
+    study_id: str, limit: int = 200, offset: int = 0, db: Session = Depends(get_db),
     owner_id: str = Depends(get_current_user_id),
 ):
     get_study(db, study_id, owner_id)
     items = db.scalars(select(Classification).where(Classification.study_id == study_id)
-                       .order_by(Classification.updated_at.desc())).all()
+                       .options(defer(Classification.labels), defer(Classification.brand_mapping))
+                       .order_by(Classification.updated_at.desc())
+                       .limit(max(1, min(limit, 500))).offset(max(offset, 0))).all()
     return [_classification_json(item) for item in items]
 
 
@@ -213,10 +216,14 @@ def frequencies(
 ):
     item = _class_or_404(db, classification_id, owner_id)
     study = get_study(db, item.study_id, owner_id)
-    frame = dataframe_for_study(db, study)
-    labels = _labels_without_blank_responses(item.labels, frame[item.question].tolist())
-    table = coding.frequency_table(labels, item.categories)
-    return {"base": coding.valid_base(labels), "rows": table.to_dict(orient="records")}
+    stamp = item.updated_at.isoformat() if item.updated_at else "0"
+    def build():
+        frame = dataframe_for_study(db, study)
+        labels = _labels_without_blank_responses(item.labels, frame[item.question].tolist())
+        table = coding.frequency_table(labels, item.categories)
+        return {"base": coding.valid_base(labels), "rows": table.to_dict(orient="records")}
+
+    return result_cache.get_or_build(f"freq:{item.id}:{stamp}", 600, build)
 
 
 @router.get("/api/classifications/{classification_id}/segments")
@@ -228,14 +235,18 @@ def segment_table(
     study = get_study(db, item.study_id, owner_id)
     if column not in study.columns:
         raise HTTPException(400, "La columna de segmento no existe.")
-    frame = dataframe_for_study(db, study)
-    labels = _labels_without_blank_responses(item.labels, frame[item.question].tolist())
-    matrix, bases = coding.crosstab_by_segment(labels, frame[column], item.categories)
-    return {"column": column, "segments": [
-        {"segment": str(segment), "base": bases[segment], **{
-            category: float(matrix.loc[category, segment]) for category in matrix.index
-        }} for segment in matrix.columns
-    ]}
+    stamp = item.updated_at.isoformat() if item.updated_at else "0"
+    def build():
+        frame = dataframe_for_study(db, study)
+        labels = _labels_without_blank_responses(item.labels, frame[item.question].tolist())
+        matrix, bases = coding.crosstab_by_segment(labels, frame[column], item.categories)
+        return {"column": column, "segments": [
+            {"segment": str(segment), "base": bases[segment], **{
+                category: float(matrix.loc[category, segment]) for category in matrix.index
+            }} for segment in matrix.columns
+        ]}
+
+    return result_cache.get_or_build(f"seg:{item.id}:{stamp}:{column}", 600, build)
 
 
 @router.post("/api/classifications/{classification_id}/insights", dependencies=[Depends(limit_by_user("insights", 10, 600))])
@@ -283,5 +294,5 @@ def export_classification(
     filename = f"{safe_name}_categorizacion.xlsx"
     return StreamingResponse(
         BytesIO(report), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": f'attachment; filename="{filename}"', "Content-Encoding": "identity"},
     )

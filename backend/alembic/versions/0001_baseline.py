@@ -2,7 +2,7 @@
 
 - Base de datos NUEVA: `alembic upgrade head` crea todas las tablas.
 - Base de datos EXISTENTE (Neon/Render ya en uso): NO ejecutes upgrade; marca la base con
-  `alembic stamp head` para que Alembic sepa que ya está al día.
+  `alembic stamp 0001_baseline` y luego aplica lo nuevo con `alembic upgrade head`.
 
 A partir de aquí, cada cambio de tablas o columnas va en una revisión nueva
 (`alembic revision --autogenerate -m "descripcion"`), porque `create_all` nunca

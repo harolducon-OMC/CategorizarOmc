@@ -4,6 +4,8 @@ import App from './App'
 import ErrorBoundary from './ErrorBoundary'
 import './styles.css'
 import './AwarenessFlow.css'
+import './perf.css'
+import { reportWebVitals } from './vitals'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
@@ -12,3 +14,5 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     </ErrorBoundary>
   </React.StrictMode>,
 )
+
+reportWebVitals()

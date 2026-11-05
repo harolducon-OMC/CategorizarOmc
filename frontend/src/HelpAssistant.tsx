@@ -76,32 +76,53 @@ export default function HelpAssistant({
     const content = question.trim()
     if (!content || busy) return
     const next = [...messages, { role: 'user' as const, content }]
-    setMessages(next)
+    setMessages([...next, { role: 'assistant', content: '' }])  // burbuja vacía que se va llenando
     setDraft('')
     setBusy(true)
     setNeedsKey(false)
+    const setAnswer = (text: string) => setMessages((current) => {
+      const copy = current.slice()
+      copy[copy.length - 1] = { role: 'assistant', content: text }
+      return copy
+    })
     try {
       const token = sessionStorage.getItem('insights-token')
       const headers = new Headers({ 'Content-Type': 'application/json' })
       if (token) headers.set('Authorization', `Bearer ${token}`)
       if (apiKey) headers.set('X-LLM-API-Key', apiKey)
-      const response = await fetch('/api/help/chat', {
+      const response = await fetch('/api/help/chat/stream', {
         method: 'POST',
         headers,
         body: JSON.stringify({ provider, model, messages: next.slice(-12) }),
       })
-      const payload = await response.json().catch(() => ({ detail: response.statusText }))
-      if (!response.ok) {
-        const detail = typeof payload.detail === 'string' ? payload.detail : 'No se pudo consultar el asistente.'
-        if (/API key|clave/i.test(detail)) setNeedsKey(true)
-        throw new Error(detail)
+      if (!response.ok || !response.body) {
+        const payload = await response.json().catch(() => ({ detail: response.statusText }))
+        throw new Error(typeof payload.detail === 'string' ? payload.detail : 'No se pudo consultar el asistente.')
       }
-      setMessages([...next, { role: 'assistant', content: payload.answer }])
+      // La respuesta llega por eventos «data: {...}» separados por una línea en blanco
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let text = ''
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const events = buffer.split('\n\n')
+        buffer = events.pop() || ''
+        for (const raw of events) {
+          const line = raw.trim()
+          if (!line.startsWith('data:')) continue
+          const event = JSON.parse(line.slice(5).trim())
+          if (event.error) throw new Error(event.error)
+          if (event.delta) { text += event.delta; setAnswer(text) }
+        }
+      }
+      if (!text) setAnswer('No pude preparar una respuesta. Intenta reformular la pregunta.')
     } catch (error) {
-      setMessages((current) => [...current, {
-        role: 'assistant',
-        content: `No pude responder ahora. ${(error as Error).message}`,
-      }])
+      const detail = (error as Error).message
+      if (/API key|clave/i.test(detail)) setNeedsKey(true)
+      setAnswer(`No pude responder ahora. ${detail}`)
     } finally {
       setBusy(false)
     }
@@ -122,7 +143,7 @@ export default function HelpAssistant({
             <button type="button" className="help-chat-close" onClick={() => setOpen(false)} aria-label="Cerrar asistente"><X size={17} /></button>
           </header>
           <div className="help-chat-messages" aria-live="polite">
-            {messages.map((message, index) => (
+            {messages.map((message, index) => !message.content ? null : (
               <div key={`${index}-${message.role}`} className={`help-chat-message ${message.role}`}>
                 <span>{message.content}</span>
                 {message.role === 'assistant' && needsKey && index === messages.length - 1 && (
@@ -139,7 +160,7 @@ export default function HelpAssistant({
                 ))}
               </div>
             )}
-            {busy && <div className="help-chat-thinking"><LoaderCircle className="spin" size={14} /> Preparando respuesta…</div>}
+            {busy && !messages[messages.length - 1]?.content && <div className="help-chat-thinking"><LoaderCircle className="spin" size={14} /> Preparando respuesta…</div>}
             <div ref={bottomRef} />
           </div>
           <form className="help-chat-composer" onSubmit={submit}>

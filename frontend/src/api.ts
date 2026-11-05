@@ -1,5 +1,4 @@
-
-export async function api<T>(path: string, options: RequestInit = {}, apiKey = ''): Promise<T> {
+async function request<T>(path: string, options: RequestInit = {}, apiKey = ''): Promise<T> {
   const headers = new Headers(options.headers)
   const accessToken = sessionStorage.getItem("insights-token")
   if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`)
@@ -13,4 +12,21 @@ export async function api<T>(path: string, options: RequestInit = {}, apiKey = '
     throw new Error(body.detail || 'Ocurrió un error al consultar el servidor.')
   }
   return response.json() as Promise<T>
+}
+
+const inflight = new Map<string, Promise<unknown>>()
+
+/**
+ * Cliente de la API. Si dos componentes piden el mismo GET a la vez, se hace una sola llamada
+ * y ambos reciben el mismo resultado (la clave incluye la sesión y la API key).
+ */
+export function api<T>(path: string, options: RequestInit = {}, apiKey = ''): Promise<T> {
+  const method = (options.method || 'GET').toUpperCase()
+  if (method !== 'GET' || options.body) return request<T>(path, options, apiKey)
+  const key = `${path}|${apiKey}|${sessionStorage.getItem('insights-token') || ''}`
+  const pending = inflight.get(key)
+  if (pending) return pending as Promise<T>
+  const promise = request<T>(path, options, apiKey).finally(() => inflight.delete(key))
+  inflight.set(key, promise)
+  return promise
 }

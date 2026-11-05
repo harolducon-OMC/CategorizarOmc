@@ -1,23 +1,28 @@
-import { useCallback, useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { Activity, BarChart3, ChevronDown, CircleHelp, Database, LayoutDashboard, KeyRound, Settings2, Tags, UsersRound, X } from 'lucide-react'
 import { api } from './api'
 import { NavButton } from './components/common'
 import { PROVIDERS } from './constants'
 import { AuthPage } from './pages/AuthPage'
-import { AwarenessHub } from './pages/AwarenessHub'
-import { DashboardPage } from './pages/DashboardPage'
 import { HomePage } from './pages/HomePage'
-import { SettingsPage } from './pages/SettingsPage'
 import type { Page, Study, Classification } from './types'
-import CategorizeWorkflow from './CategorizeWorkflow'
 import HelpAssistant from './HelpAssistant'
+import { PageSkeleton } from './components/Skeleton'
+import { setVitalsPage } from './vitals'
 import './AwarenessExtras.css'
+
+// Cada pantalla pesada se descarga solo cuando se abre (el JS inicial es mucho más pequeño)
+const AwarenessHub = lazy(() => import('./pages/AwarenessHub').then((m) => ({ default: m.AwarenessHub })))
+const DashboardPage = lazy(() => import('./pages/DashboardPage').then((m) => ({ default: m.DashboardPage })))
+const SettingsPage = lazy(() => import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })))
+const CategorizeWorkflow = lazy(() => import('./CategorizeWorkflow'))
 
 function App() {
   const [page, setPage] = useState<Page>('home')
   const [studies, setStudies] = useState<Study[]>([])
   const [studyId, setStudyId] = useState(localStorage.getItem('insights-study') || '')
   const [study, setStudy] = useState<any>(null)
+  const [studiesLoaded, setStudiesLoaded] = useState(false)
   const [provider, setProvider] = useState(() => {
     const saved = localStorage.getItem('insights-provider') || ''
     return PROVIDERS[saved] ? saved : 'gemini'
@@ -60,7 +65,7 @@ function App() {
 
   useEffect(() => {
     if (!userEmail) return
-    refreshStudies().catch((err) => setNotice({ text: `No se pudo conectar con la API: ${err.message}`, error: true }))
+    refreshStudies().catch((err) => setNotice({ text: `No se pudo conectar con la API: ${err.message}`, error: true })).finally(() => setStudiesLoaded(true))
   }, [userEmail])
 
   useEffect(() => {
@@ -98,15 +103,21 @@ function App() {
 
   async function deleteStudy(id: string) {
     if (!window.confirm('¿Eliminar este estudio y sus clasificaciones guardadas? Esta acción no se puede deshacer.')) return
+    // Optimista: el estudio desaparece de inmediato y se restaura si el servidor falla
+    const previousStudies = studies, previousId = studyId
+    const remaining = studies.filter((item) => item.id !== id)
+    setStudies(remaining)
+    setStudyId(remaining[0]?.id || '')
     try {
       await api(`/api/studies/${id}`, { method: 'DELETE' })
-      const remaining = studies.filter((item) => item.id !== id)
-      setStudies(remaining)
-      const next = remaining[0]?.id || ''
-      setStudyId(next)
       setNotice({ text: 'Estudio eliminado.' })
-    } catch (err) { setNotice({ text: (err as Error).message, error: true }) }
+    } catch (err) {
+      setStudies(previousStudies); setStudyId(previousId)
+      setNotice({ text: (err as Error).message, error: true })
+    }
   }
+
+  useEffect(() => { setVitalsPage(page) }, [page])
 
   const activeClassifications: Classification[] = study?.classifications || []
   const activePageTitle: Record<Page, string> = {
@@ -161,6 +172,7 @@ function App() {
         </header>
         {notice && <div className={`toast ${notice.error ? 'toast-error' : ''}`}><span>{notice.text}</span><button onClick={() => setNotice(null)}><X size={16} /></button></div>}
         <div className="page-content">
+          {!studiesLoaded ? <PageSkeleton /> : <Suspense fallback={<PageSkeleton />}>
           {page === 'home' && <HomePage studies={studies} study={study} onUpload={async (file, name, sheet) => {
             const form = new FormData(); form.append('file', file); form.append('name', name); form.append('sheet', sheet)
             setBusy(true)
@@ -172,6 +184,7 @@ function App() {
           {page === 'dashboard' && <DashboardPage study={study} apiKey={apiKey} provider={provider} model={model} onNotice={setNotice} />}
           {page === 'awareness' && <AwarenessHub study={study} onNotice={setNotice} />}
           {page === 'settings' && <SettingsPage provider={provider} model={model} apiKey={apiKey} setApiKey={setApiKey} onProvider={changeProvider} setModel={setModel} onKeysChanged={refreshKeys} />}
+          </Suspense>}
         </div>
         <footer className="footer-note">Insights Studio · OMC <span>© 2026 Harold Ducon and Research.</span></footer>
       </main>

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { ArrowDownToLine, Check, Search, Sparkles, UsersRound } from 'lucide-react'
 import { Bar, BarChart, CartesianGrid, Cell, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { api } from '../api'
+import { ChartSkeleton } from '../components/Skeleton'
 import { PageHeading, EmptyState } from '../components/common'
 import { COLORS } from '../constants'
 import type { Classification, Frequency, ReviewRow } from '../types'
@@ -17,12 +18,14 @@ export function DashboardPage({ study, apiKey, provider, model, onNotice }: any)
   const [reviewOffset, setReviewOffset] = useState(0)
   const [edits, setEdits] = useState<Record<number, string[]>>({})
   const [subBusy, setSubBusy] = useState(false)
+  const [loadingFreq, setLoadingFreq] = useState(false)
   const selected = classes.find((item) => item.id === selectedId) || classes[0]
   useEffect(() => { if (classes.length && !classes.some((item) => item.id === selectedId)) setSelectedId(classes[0].id) }, [study?.id, classes.length])
   useEffect(() => {
     if (!selected) return
-    setInsight(null); setReviewRows([]); setReviewOffset(0); setEdits({})
-    api<{ base: number; rows: Frequency[] }>(`/api/classifications/${selected.id}/frequencies`).then((r) => { setFreq(r.rows); setBase(r.base) }).catch((e) => onNotice({ text: e.message, error: true }))
+    setInsight(null); setReviewRows([]); setReviewOffset(0); setEdits({}); setFreq([]); setLoadingFreq(true)
+    // Las dos consultas son independientes: se lanzan a la vez
+    api<{ base: number; rows: Frequency[] }>(`/api/classifications/${selected.id}/frequencies`).then((r) => { setFreq(r.rows); setBase(r.base) }).catch((e) => onNotice({ text: e.message, error: true })).finally(() => setLoadingFreq(false))
     api<any>(`/api/classifications/${selected.id}/rows?offset=0&limit=100`).then((r) => setReviewRows(r.rows)).catch(() => {})
   }, [selected?.id])
   async function loadMore() {
@@ -36,8 +39,11 @@ export function DashboardPage({ study, apiKey, provider, model, onNotice }: any)
     const changes = Object.entries(edits).map(([row_index, labels]) => ({ row_index: Number(row_index), labels }))
     if (!changes.length) { onNotice({ text: 'No hay cambios pendientes por guardar.' }); return }
     setSubBusy(true)
-    try { await api(`/api/classifications/${selected.id}/labels`, { method: 'PATCH', body: JSON.stringify({ changes }) }); setReviewRows(reviewRows.map((row) => edits[row.row_index] ? { ...row, labels: edits[row.row_index] } : row)); setEdits({}); onNotice({ text: `Se guardaron ${changes.length} correcciones.` }); const result = await api<any>(`/api/classifications/${selected.id}/frequencies`); setFreq(result.rows); setBase(result.base) }
-    catch (err) { onNotice({ text: (err as Error).message, error: true }) }
+    // Optimista: la tabla se actualiza al instante y solo se revierte si el servidor falla
+    const previousRows = reviewRows, previousEdits = edits
+    setReviewRows(reviewRows.map((row) => edits[row.row_index] ? { ...row, labels: edits[row.row_index] } : row)); setEdits({})
+    try { await api(`/api/classifications/${selected.id}/labels`, { method: 'PATCH', body: JSON.stringify({ changes }) }); onNotice({ text: `Se guardaron ${changes.length} correcciones.` }); const result = await api<any>(`/api/classifications/${selected.id}/frequencies`); setFreq(result.rows); setBase(result.base) }
+    catch (err) { setReviewRows(previousRows); setEdits(previousEdits); onNotice({ text: (err as Error).message, error: true }) }
     finally { setSubBusy(false) }
   }
   async function generate() {
@@ -79,7 +85,7 @@ export function DashboardPage({ study, apiKey, provider, model, onNotice }: any)
     <div className="dashboard-toolbar"><div className="select-icon"><Search size={15} /><select value={selected?.id || ''} onChange={(e) => setSelectedId(e.target.value)}>{classes.map((item) => <option key={item.id} value={item.id}>{item.question} · {item.kind === 'brands' ? 'Marcas' : item.kind === 'sentiment' ? 'Sentimiento' : 'Temas'}</option>)}</select></div><span className="base-chip"><UsersRound size={15} /> Base válida: <b>{base.toLocaleString()}</b></span></div>
     <div className="dashboard-grid dashboard-grid-single">
       <section className="card chart-card"><div className="card-heading"><div><div className="card-label">DISTRIBUCIÓN</div><h3>Frecuencia por categoría</h3></div><span className="soft-badge">{chartData.length} categorías</span></div>
-        {chartData.length ? <div className="chart-wrap"><ResponsiveContainer width="100%" height={Math.max(300, chartData.length * 48)}><BarChart data={chartData} layout="vertical" margin={{ top: 8, right: 32, left: 16, bottom: 8 }}><CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e9edf3" /><XAxis type="number" tickFormatter={(v) => `${Math.round(v * 100)}%`} axisLine={false} tickLine={false} tick={{ fill: '#8b94a7', fontSize: 11 }} /><YAxis type="category" dataKey="name" width={140} axisLine={false} tickLine={false} tick={{ fill: '#4b566b', fontSize: 12 }} /><Tooltip formatter={(value: any, _name: any, props: any) => [`${(Number(value) * 100).toFixed(1)}% · ${props.payload.n} menciones`, 'Frecuencia']} contentStyle={{ border: '1px solid #e7eaf0', borderRadius: 10, fontSize: 12 }} /><Bar dataKey="pct" radius={[0, 5, 5, 0]} barSize={21}>{chartData.map((_item, index) => <Cell key={index} fill={COLORS[index % COLORS.length]} />)}<LabelList dataKey="pct" position="right" formatter={(v: any) => `${Math.round(Number(v) * 100)}%`} style={{ fill: '#647086', fontSize: 11 }} /></Bar></BarChart></ResponsiveContainer></div> : <div className="empty-inline">No hay respuestas válidas para graficar.</div>}
+        {loadingFreq && !chartData.length ? <ChartSkeleton /> : chartData.length ? <div className="chart-wrap"><ResponsiveContainer width="100%" height={Math.max(300, chartData.length * 48)}><BarChart data={chartData} layout="vertical" margin={{ top: 8, right: 32, left: 16, bottom: 8 }}><CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e9edf3" /><XAxis type="number" tickFormatter={(v) => `${Math.round(v * 100)}%`} axisLine={false} tickLine={false} tick={{ fill: '#8b94a7', fontSize: 11 }} /><YAxis type="category" dataKey="name" width={140} axisLine={false} tickLine={false} tick={{ fill: '#4b566b', fontSize: 12 }} /><Tooltip formatter={(value: any, _name: any, props: any) => [`${(Number(value) * 100).toFixed(1)}% · ${props.payload.n} menciones`, 'Frecuencia']} contentStyle={{ border: '1px solid #e7eaf0', borderRadius: 10, fontSize: 12 }} /><Bar dataKey="pct" radius={[0, 5, 5, 0]} barSize={21}>{chartData.map((_item, index) => <Cell key={index} fill={COLORS[index % COLORS.length]} />)}<LabelList dataKey="pct" position="right" formatter={(v: any) => `${Math.round(Number(v) * 100)}%`} style={{ fill: '#647086', fontSize: 11 }} /></Bar></BarChart></ResponsiveContainer></div> : <div className="empty-inline">No hay respuestas válidas para graficar.</div>}
         <div className="frequency-table"><div className="table-scroll"><table><thead><tr><th>Categoría</th><th>Personas</th><th>Porcentaje</th></tr></thead><tbody>{freq.map((row) => <tr key={row.Categoría}><td><span className="color-dot" style={{ background: COLORS[freq.indexOf(row) % COLORS.length] }} />{row.Categoría}</td><td>{row.Menciones.toLocaleString()}</td><td>{(row['%'] * 100).toFixed(1)}%</td></tr>)}</tbody></table></div></div>
       </section>
     </div>
