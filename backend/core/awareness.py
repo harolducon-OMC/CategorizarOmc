@@ -239,6 +239,63 @@ def frame_with_categorized_responses(df: pd.DataFrame, classifications) -> pd.Da
         output[question] = cleaned
     return output
 
+def clean_codes(value) -> List[str]:
+    """Lista de códigos de pregunta reales: sin vacíos y sin el marcador «0» (= sin pregunta)."""
+    if isinstance(value, str):
+        return [code for code in prefixes_to_list(value) if code != "0"]
+    return [str(code).strip() for code in (value or []) if str(code).strip() and str(code).strip() != "0"]
+
+
+def resolve_columns(df: pd.DataFrame, tom, esp, ayu) -> Dict[str, List[str]]:
+    """Convierte los códigos (P1, P2…) en columnas reales con las mismas reglas que build_analysis.
+
+    Devuelve las columnas por rol y la lista de códigos que no coinciden con ninguna columna.
+    """
+    result: Dict[str, List[str]] = {"tom": [], "esp": [], "ayu": [], "unmatched": [], "extra_tom": []}
+    tom_codes = clean_codes(tom)
+    for code in tom_codes[:1]:
+        column = find_col(df, code)
+        if column is None:
+            result["unmatched"].append(code)
+        else:
+            result["tom"].append(column)
+    result["extra_tom"] = tom_codes[1:]
+    for role, codes in (("esp", clean_codes(esp)), ("ayu", clean_codes(ayu))):
+        for code in codes:
+            matched = find_cols(df, code)
+            if not matched:
+                result["unmatched"].append(code)
+            for column in matched:
+                if column not in result[role]:
+                    result[role].append(column)
+    return result
+
+
+def categorization_sources(df: pd.DataFrame, columns: Dict[str, List[str]], classifications) -> List[Dict]:
+    """Por cada columna usada: ¿se está usando lo categorizado o el texto original?"""
+    saved = {}
+    for item in classifications:
+        question = item.get("question") if isinstance(item, dict) else getattr(item, "question", None)
+        labels = item.get("labels") if isinstance(item, dict) else getattr(item, "labels", None)
+        saved[question] = labels or []
+    rows = []
+    for role_key, role_label in (("tom", "TOM"), ("esp", "Espontáneo"), ("ayu", "Ayudado")):
+        for column in columns.get(role_key, []):
+            answered_mask = [not _is_empty_response(value) for value in df[column].tolist()]
+            entry = {"role": role_label, "column": column, "source": "texto original",
+                     "answered": int(sum(answered_mask)), "labeled": None, "stale": False}
+            if column in saved:
+                labels = saved[column]
+                entry["source"] = "categorizado"
+                entry["stale"] = len(labels) != len(df)
+                entry["labeled"] = int(sum(
+                    1 for index, answered in enumerate(answered_mask)
+                    if answered and index < len(labels) and labels[index]
+                ))
+            rows.append(entry)
+    return rows
+
+
 def entity_from_aided_col(column_name: str, entities: List[str]) -> Optional[str]:
     text = norm(str(column_name).replace("\n", " "))
     for entity in entities:

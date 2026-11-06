@@ -4,3 +4,8 @@
 .awa-result-toolbar h4{margin:0}
 @media(max-width:700px){.awa-export-actions{display:grid;grid-template-columns:1fr 1fr}.awa-export-actions .button-secondary{font-size:9px}.awa-result-toolbar{align-items:flex-start;flex-direction:column}}
 .awa-base-warning{margin:10px 0 4px;padding:10px 13px;border:1px solid #f1d49a;border-radius:10px;background:#fff8e8;color:#7a5200;font-size:12px;line-height:1.5}
+.awa-sources{margin:6px 0 14px;padding:12px 14px;border:1px solid #e7ebf2;border-radius:10px;background:#fbfcfe}
+.awa-sources table{margin-top:8px}.awa-sources td,.awa-sources th{font-size:10px;padding:7px 8px}
+.awa-sources td:nth-child(2){max-width:300px;overflow:hidden;text-overflow:ellipsis}
+.awa-source-chip{display:inline-block;padding:3px 8px;border-radius:999px;font-size:9.5px;font-weight:600}
+.awa-source-chip.ok{background:#e8f7f2;color:#1f7a63}.awa-source-chip.raw{background:#fff4e0;color:#8a5a00}

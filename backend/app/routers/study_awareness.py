@@ -46,24 +46,33 @@ def calculate_awareness(
     )]
     active_analyses = [
         item for item in analysis_requests
-        if item.tom_column or item.spontaneous_columns or item.aided_columns
+        if awareness.clean_codes(item.tom_column) or awareness.clean_codes(item.spontaneous_columns)
+        or awareness.clean_codes(item.aided_columns)
     ]
     if not active_analyses:
         raise HTTPException(400, "Configura al menos una pregunta TOM, espontánea o ayudada en uno de los análisis.")
 
-    invalid_cols = [
-        column for item in active_analyses
-        for column in [item.tom_column, *item.spontaneous_columns, *item.aided_columns]
-        if column and column not in frame.columns
-    ]
-    invalid_cols.extend(
-        column for column in [*request.demographics.values(), request.segment_column]
-        if column and column not in frame.columns
-    )
-    if invalid_cols:
-        raise HTTPException(400, f"Columnas desconocidas: {', '.join(invalid_cols)}")
-    demo_cols = {key: request.demographics.get(key) or None for key in
-                 ("sexo", "edad", "departamento", "estrato", "ingreso")}
+    # Los códigos (P1, P2…) se resuelven a columnas igual que en Awareness independiente
+    resolved_by_analysis = []
+    problems = []
+    for item in active_analyses:
+        resolved = awareness.resolve_columns(frame, item.tom_column, item.spontaneous_columns, item.aided_columns)
+        resolved_by_analysis.append(resolved)
+        label = item.name or "Awareness"
+        if resolved["unmatched"]:
+            problems.append(f"{label}: no se encontró ninguna columna para {', '.join(resolved['unmatched'])}")
+        if resolved["extra_tom"]:
+            problems.append(f"{label}: TOM admite una sola pregunta (sobran {', '.join(resolved['extra_tom'])})")
+    demo_cols = {}
+    for key in ("sexo", "edad", "departamento", "estrato", "ingreso"):
+        code = (request.demographics.get(key) or "").strip()
+        demo_cols[key] = awareness.find_col(frame, code) if code else None
+        if code and code != "0" and demo_cols[key] is None:
+            problems.append(f"Demográfico {key}: no se encontró la columna {code}")
+    if request.segment_column and request.segment_column not in frame.columns:
+        problems.append(f"Segmento: la columna {request.segment_column} no existe")
+    if problems:
+        raise HTTPException(400, "Revisa estos códigos: " + "; ".join(problems) + ".")
     categorized_items = db.scalars(
         select(Classification).where(
             Classification.study_id == study_id,
@@ -77,12 +86,12 @@ def calculate_awareness(
             frame[request.segment_column] = frame[request.segment_column].fillna("Sin dato").astype(str)
             analysis_frame[request.segment_column] = frame[request.segment_column]
         analysis_results = []
-        for item in active_analyses:
+        for item, resolved in zip(active_analyses, resolved_by_analysis):
             config = {
                 "name": item.name or "Awareness",
-                "tom": item.tom_column or "0",
-                "esp": "\n".join(item.spontaneous_columns) or "0",
-                "ayu": "\n".join(item.aided_columns) or "0",
+                "tom": (awareness.clean_codes(item.tom_column) or ["0"])[0],
+                "esp": "\n".join(awareness.clean_codes(item.spontaneous_columns)) or "0",
+                "ayu": "\n".join(awareness.clean_codes(item.aided_columns)) or "0",
             }
             _, indicators, _ = awareness.build_analysis(
                 analysis_frame, demo_cols, config, entities, merged_aliases, [], 0
@@ -92,7 +101,10 @@ def calculate_awareness(
                 selected_value if request.segment_column else None, entities,
             )
             rows = table.to_dict(orient="records")
-            analysis_results.append({"name": config["name"], "rows": rows})
+            analysis_results.append({
+                "name": config["name"], "rows": rows,
+                "sources": awareness.categorization_sources(frame, resolved, categorized_items),
+            })
     except Exception as exc:
         logger.exception("Fallo en calculate_awareness")
         raise HTTPException(400, f"No se pudo calcular Awareness: {exc}") from exc

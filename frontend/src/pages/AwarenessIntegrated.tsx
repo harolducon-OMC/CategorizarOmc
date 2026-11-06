@@ -194,6 +194,20 @@ export function AwarenessPage({ study, onNotice }: any) {
                 <button className="button-secondary" disabled={!imageRows.length} onClick={() => downloadAwarenessTableImage(imageRows, { title: `Awareness · ${analysis.name}`, subtitle: baseText, filename: `${filePart}_tabla.png` }).catch((err) => onNotice({ text: (err as Error).message, error: true }))}><ArrowDownToLine size={14} /> Descargar tabla</button>
               </div>
             </div>
+            {analysis.sources?.length > 0 && <div className="awa-sources">
+              <div className="card-label">FUENTE DE LOS DATOS</div>
+              <div className="table-scroll"><table><thead><tr><th>Rol</th><th>Columna</th><th>Fuente</th><th>Con respuesta</th><th>Con etiqueta</th></tr></thead><tbody>
+                {analysis.sources.map((source: any) => <tr key={`${source.role}-${source.column}`}>
+                  <td>{source.role}</td>
+                  <td title={source.column}>{source.column}</td>
+                  <td><span className={`awa-source-chip ${source.source === 'categorizado' ? 'ok' : 'raw'}`}>{source.source === 'categorizado' ? 'Categorizado' : 'Texto original'}</span></td>
+                  <td>{source.answered}</td>
+                  <td>{source.labeled ?? '—'}</td>
+                </tr>)}
+              </tbody></table></div>
+              {analysis.sources.some((source: any) => source.source !== 'categorizado' && source.role !== 'Ayudado') && <div className="awa-base-warning" role="note"><b>Hay columnas sin categorizar.</b> Para TOM y Espontáneo, Awareness usa en ese caso el texto original con los alias detectados. Para que use tu categorización (y tus correcciones manuales), clasifica esa pregunta como «Marcas» en Categorización.</div>}
+              {analysis.sources.some((source: any) => source.stale) && <div className="awa-base-warning" role="alert"><b>Categorización desactualizada.</b> Alguna clasificación tiene un número de filas distinto al del estudio. Vuelve a clasificar esa pregunta.</div>}
+            </div>}
             <div id={`integrated-awareness-chart-${analysisIndex}`} className="chart-wrap"><ResponsiveContainer width="100%" height={Math.max(260, chartRows.length * 40)}><BarChart data={chartRows} layout="vertical" margin={{ left: 18, right: 26 }}><CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e9edf3" /><XAxis type="number" tickFormatter={(v) => `${Math.round(v * 100)}%`} axisLine={false} tickLine={false} /><YAxis type="category" dataKey="name" width={130} reversed axisLine={false} tickLine={false} /><Tooltip formatter={(v: any) => `${(Number(v) * 100).toFixed(1)}%`} /><Bar dataKey="tom" name="TOM" stackId="a" fill="#315bdb" /><Bar dataKey="espontaneo" name="Espontáneo" stackId="a" fill="#18a994" /><Bar dataKey="ayudado" name="Ayudado" stackId="a" fill="#ef9b46" /></BarChart></ResponsiveContainer></div>
             <div className="table-scroll"><table><thead><tr><th>Marca</th><th>TOM</th><th>Espontáneo</th><th>Ayudado</th><th>AWA</th></tr></thead><tbody>{rankedRows.map((r: any) => <tr key={r.Entidad}><td>{r.Entidad}</td><td>{(r['TOM %'] * 100).toFixed(1)}%</td><td>{(r['Espontaneo %'] * 100).toFixed(1)}%</td><td>{(r['Ayudado %'] * 100).toFixed(1)}%</td><td><b>{(r['AWA %'] * 100).toFixed(1)}%</b></td></tr>)}</tbody></table></div>
           </div>
