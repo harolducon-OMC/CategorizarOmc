@@ -3,6 +3,7 @@ import { ArrowDownToLine, Check, Search, Sparkles, UsersRound } from 'lucide-rea
 import { Bar, BarChart, CartesianGrid, Cell, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { api } from '../api'
 import { ChartSkeleton } from '../components/Skeleton'
+import { QualityPanel } from '../components/QualityPanel'
 import { PageHeading, EmptyState } from '../components/common'
 import { COLORS } from '../constants'
 import type { Classification, Frequency, ReviewRow } from '../types'
@@ -34,6 +35,12 @@ export function DashboardPage({ study, apiKey, provider, model, onNotice }: any)
     try { const result = await api<any>(`/api/classifications/${selected.id}/rows?offset=${next}&limit=100`); setReviewRows([...reviewRows, ...result.rows]); setReviewOffset(next) }
     catch (err) { onNotice({ text: (err as Error).message, error: true }) }
   }
+  function refreshAfterQuality() {
+    if (!selected) return
+    api<{ base: number; rows: Frequency[] }>(`/api/classifications/${selected.id}/frequencies`).then((r) => { setFreq(r.rows); setBase(r.base) }).catch(() => {})
+    api<any>(`/api/classifications/${selected.id}/rows?offset=0&limit=100`).then((r) => setReviewRows(r.rows)).catch(() => {})
+  }
+
   async function saveEdits() {
     if (!selected) return
     const changes = Object.entries(edits).map(([row_index, labels]) => ({ row_index: Number(row_index), labels }))
@@ -92,6 +99,7 @@ export function DashboardPage({ study, apiKey, provider, model, onNotice }: any)
     {selected && <SegmentExplorer classification={selected} columns={study.columns || []} freq={freq} onNotice={onNotice} />}
     <div className="section-title-row mt-28"><div><h2>Insights cualitativos</h2><p>La IA redacta a partir de respuestas reales; cifras y citas se controlan desde el código.</p></div><button className="button-secondary" disabled={subBusy} onClick={generate}><Sparkles size={16} /> {subBusy ? 'Generando…' : 'Generar insights'}</button></div>
     {insight?.categorias?.length ? <div className="insight-grid">{insight.resumen && <div className="summary-insight"><div className="insight-kicker"><Sparkles size={15} /> LECTURA GENERAL</div><p>{insight.resumen}</p></div>}{insight.categorias.map((item: any) => <article className="card insight-card" key={item.categoria}><div className="insight-top"><span className="insight-dot" /> <b>{item.categoria}</b><span>{item.n} respuestas · {(item.pct * 100).toFixed(0)}%</span></div><p>{item.explicacion}</p>{item.citas?.map((quote: string, i: number) => <blockquote key={i}>“{quote}”</blockquote>)}</article>)}</div> : <div className="empty-panel"><div className="empty-icon"><Sparkles size={19} /></div><b>¿Qué está diciendo tu audiencia?</b><span>Genera una síntesis temática con citas verificables de las respuestas.</span></div>}
+    {selected && <QualityPanel classification={selected} onNotice={onNotice} onChanged={refreshAfterQuality} />}
     <div className="section-title-row mt-32"><div><h2>Revisión y edición manual</h2><p>Corrige una etiqueta por fila; el cambio se guarda directamente en PostgreSQL.</p></div><button className="button-primary" onClick={saveEdits} disabled={subBusy || !Object.keys(edits).length}><Check size={15} /> Guardar {Object.keys(edits).length ? `(${Object.keys(edits).length})` : 'cambios'}</button></div>
     <div className="card review-card"><div className="review-toolbar"><div className="card-label">RESPUESTAS · MUESTRA DE {reviewRows.length}</div><span className="muted">{study.row_count.toLocaleString()} filas · Ctrl/Cmd para elegir varias etiquetas</span></div><div className="table-scroll"><table><thead><tr><th>Fila</th><th>Respuesta</th><th>Etiqueta actual</th><th>Editar etiquetas</th></tr></thead><tbody>{reviewRows.map((row) => { const options = [...selected.categories, ...['Ninguna', 'NS/NR'].filter((value) => (value !== 'Ninguna' || selected.kind === 'brands') && !selected.categories.includes(value))]; return <tr key={row.row_index}><td className="row-number">{row.row_index + 1}</td><td className="response-cell">{row.response || <span className="muted">(vacía)</span>}</td><td><span className="label-chip">{row.labels.join(' · ')}</span></td><td><select multiple disabled={!String(row.response ?? '').trim()} size={2} value={edits[row.row_index] ?? row.labels} onChange={(e) => { let values = Array.from(e.target.selectedOptions).map((option) => option.value); const exclusive = values.find((value) => value === 'Ninguna' || value === 'NS/NR'); if (exclusive) values = [exclusive]; setEdits({ ...edits, [row.row_index]: values }) }}>{options.map((c: string) => <option key={c} value={c}>{c}</option>)}</select></td></tr> })}</tbody></table></div>{reviewRows.length < study.row_count && <button className="button-secondary load-more" onClick={loadMore}>Cargar más respuestas</button>}</div>
   </>

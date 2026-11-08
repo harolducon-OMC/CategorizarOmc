@@ -15,7 +15,7 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///./unused-by-tests.db")  # nunca
 
 try:
     from fastapi.testclient import TestClient
-    from app import ratelimit
+    from app import policies, ratelimit
     from app.db import get_db
     from app.main import app
     from app.security import create_access_token
@@ -43,6 +43,13 @@ class ApiHttpLayerTests(unittest.TestCase):
         self.env_patch = patch.dict(os.environ, {"RATE_LIMIT_DISABLED": "0"})
         self.env_patch.start()
         ratelimit.limiter.reset()
+        # Estado de la cuenta y políticas sin tocar la base de datos
+        self.status = {"id": "user-1", "email": "ana@omc", "role": "user", "active": True, "banned": False,
+                       "must_change_password": False, "token_version": 0}
+        self.status_patch = patch("app.accounts.account_status", side_effect=lambda email: self.status)
+        self.status_patch.start()
+        self.policy_patch = patch("app.policies.get_policy", return_value=policies.default_policy())
+        self.policy_patch.start()
         self.db = MagicMock()
         app.dependency_overrides[get_db] = lambda: self.db
         self.client = TestClient(app)  # sin "with": no ejecuta el evento de arranque (sin BD)
@@ -50,6 +57,8 @@ class ApiHttpLayerTests(unittest.TestCase):
 
     def tearDown(self):
         app.dependency_overrides.clear()
+        self.status_patch.stop()
+        self.policy_patch.stop()
         self.env_patch.stop()
         self.secret_patch.stop()
         ratelimit.limiter.reset()
@@ -102,6 +111,40 @@ class ApiHttpLayerTests(unittest.TestCase):
         self.assertEqual(response.status_code, 404)
 
     # ---- validación y límites
+    # ---- cuentas y roles
+    def test_regular_users_cannot_use_admin_endpoints(self):
+        self.db.scalar.return_value = SimpleNamespace(id="u1", email="ana@omc", role="user", banned_at=None, is_active=True)
+        for method, url in (("GET", "/api/admin/users"), ("GET", "/api/admin/policies"), ("GET", "/api/admin/audit")):
+            self.assertEqual(self.client.request(method, url, headers=self.headers).status_code, 403, url)
+
+    def test_banned_account_is_blocked_even_with_a_valid_token(self):
+        self.status["banned"] = True
+        response = self.client.get("/api/studies", headers=self.headers)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["code"], "account_banned")
+
+    def test_inactive_account_is_blocked(self):
+        self.status["active"] = False
+        response = self.client.get("/api/studies", headers=self.headers)
+        self.assertEqual((response.status_code, response.json()["code"]), (403, "account_inactive"))
+
+    def test_session_is_closed_when_the_token_version_changes(self):
+        self.status["token_version"] = 3  # el administrador restableció la contraseña o baneó la cuenta
+        response = self.client.get("/api/studies", headers=self.headers)
+        self.assertEqual((response.status_code, response.json()["code"]), (401, "session_invalid"))
+
+    def test_temporary_password_forces_a_change_before_anything_else(self):
+        self.status["must_change_password"] = True
+        blocked = self.client.get("/api/studies", headers=self.headers)
+        self.assertEqual((blocked.status_code, blocked.json()["code"]), (403, "password_change_required"))
+        me = self.client.get("/api/auth/me", headers=self.headers)
+        self.assertEqual(me.status_code, 200)
+        self.assertTrue(me.json()["must_change_password"])
+
+    def test_me_reports_the_role(self):
+        self.status["role"] = "admin"
+        self.assertEqual(self.client.get("/api/auth/me", headers=self.headers).json()["role"], "admin")
+
     def test_login_rejects_short_passwords(self):
         response = self.client.post("/api/auth/login", json={"email": "ana@omc", "password": "corta"})
         self.assertEqual(response.status_code, 422)
@@ -112,6 +155,20 @@ class ApiHttpLayerTests(unittest.TestCase):
             "/api/auth/register", json={"email": "alguien@gmail.com", "password": "una-clave-larga-123"},
         )
         self.assertEqual(response.status_code, 403)
+
+    def test_help_ask_answers_from_the_local_guide_without_ai(self):
+        response = self.client.post(
+            "/api/help/ask", json={"question": "¿Cómo subo mi encuesta?", "page": "home"}, headers=self.headers,
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertTrue(body["confident"])
+        self.assertEqual(body["article"], "importar-archivo")
+
+    def test_help_ask_reports_when_the_guide_has_no_answer(self):
+        response = self.client.post("/api/help/ask", json={"question": "receta de arepas"}, headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["confident"])
 
     def test_login_is_throttled_per_email_after_repeated_failures(self):
         self.db.scalar.return_value = None  # usuario inexistente -> 401

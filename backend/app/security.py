@@ -26,17 +26,24 @@ def verify_password(password: str, password_hash: str) -> bool:
     return PASSWORD_HASHER.verify(password, password_hash)
 
 
-def create_access_token(subject: str) -> str:
+def create_access_token(subject: str, token_version: int = 0, minutes: int | None = None) -> str:
+    """JWT de sesión. `tv` (versión del token) permite invalidar sesiones al banear o cambiar contraseñas."""
     now = datetime.now(timezone.utc)
-    return jwt.encode({"sub": subject, "iat": now, "exp": now + timedelta(minutes=ACCESS_TOKEN_MINUTES)}, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    payload = {"sub": subject, "iat": now, "exp": now + timedelta(minutes=minutes or ACCESS_TOKEN_MINUTES), "tv": int(token_version)}
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def token_claims(token: str) -> dict | None:
+    try:
+        claims = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    except JWTError:
+        return None
+    return claims if isinstance(claims.get("sub"), str) else None
 
 
 def token_subject(token: str) -> str | None:
-    try:
-        subject = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM]).get("sub")
-        return subject if isinstance(subject, str) else None
-    except JWTError:
-        return None
+    claims = token_claims(token)
+    return claims["sub"] if claims else None
 
 
 def allowed_email_domain() -> str:

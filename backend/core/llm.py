@@ -4,6 +4,8 @@ import json
 import re
 from typing import Any, Optional
 
+from .privacy import redact_enabled, redact_pii
+
 DEFAULT_PROVIDER = "gemini"
 DEFAULT_MODEL = "gemini-3.5-flash-lite"
 # Endpoints directos de los servicios de inferencia. Directorios API no son proveedores.
@@ -63,6 +65,8 @@ class LLM:
     def text(self, system: str, user: str, model: Optional[str] = None,
              max_tokens: int = 2000, temperature: Optional[float] = 0.0,
              json_mode: bool = False) -> str:
+        if redact_enabled():
+            user = redact_pii(user)  # minimización de datos personales antes de salir al proveedor
         model_name = model or self.fast
         if self.provider == "anthropic":
             kwargs = {"model": model_name, "max_tokens": max_tokens, "system": system,
@@ -122,6 +126,8 @@ class LLM:
     def stream_text(self, system: str, user: str, model: Optional[str] = None,
                     max_tokens: int = 2000, temperature: Optional[float] = 0.0):
         """Genera la respuesta token a token: generador de fragmentos de texto."""
+        if redact_enabled():
+            user = redact_pii(user)
         model_name = model or self.fast
         if self.provider == "anthropic":
             kwargs = {"model": model_name, "max_tokens": max_tokens, "system": system,

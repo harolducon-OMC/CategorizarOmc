@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from core import help_assistant
+from core import help_assistant, help_kb
 from core.llm import PROVIDER_CONFIG
 from ..common import _api_key_for_user
 from ..db import get_db
@@ -116,3 +116,22 @@ def record_web_vital(payload: VitalPayload):
         payload.name, payload.value, payload.rating or "-", payload.page or "-", payload.connection or "-",
     )
     return Response(status_code=204)
+
+
+class HelpAskRequest(BaseModel):
+    question: str = Field(default="", max_length=500)
+    article: Optional[str] = Field(default=None, max_length=60)
+    page: Optional[Literal["home", "categorize", "dashboard", "awareness", "settings", "admin"]] = None
+
+
+@router.post("/api/help/ask", dependencies=[Depends(limit_by_user("help-ask", 90, 60))])
+def platform_help_ask(payload: HelpAskRequest):
+    """Respuesta de la guía propia de Insy: sin IA, sin costo y sin enviar datos a terceros."""
+    if payload.article:
+        result = help_kb.answer_for(payload.article)
+        if result is None:
+            raise HTTPException(404, "Ese tema de ayuda no existe.")
+        return result
+    if not payload.question.strip():
+        raise HTTPException(422, "Escribe una pregunta.")
+    return help_kb.ask(payload.question, payload.page)

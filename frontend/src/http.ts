@@ -1,3 +1,4 @@
+import { reportAuthFailure } from './authEvents'
 /** Cliente mínimo para componentes que consultan la API con el token de sesión. */
 async function requestJson<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers)
@@ -7,6 +8,7 @@ async function requestJson<T>(path: string, options: RequestInit = {}): Promise<
   const response = await fetch(path, { ...options, headers })
   if (!response.ok) {
     const body = await response.json().catch(() => ({ detail: response.statusText }))
+    reportAuthFailure(response.status, body, path)
     throw new Error(typeof body.detail === 'string' ? body.detail : 'Ocurrió un error al consultar el servidor.')
   }
   return response.json() as Promise<T>

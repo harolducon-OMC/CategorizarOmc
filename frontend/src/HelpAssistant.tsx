@@ -1,19 +1,52 @@
 import { FormEvent, useEffect, useRef, useState } from 'react'
-import { ArrowRight, LoaderCircle, Send, Settings2, X } from 'lucide-react'
+import { ArrowRight, LoaderCircle, Send, Settings2, Sparkles, X } from 'lucide-react'
+import { api } from './api'
+import type { Page } from './types'
 import './HelpAssistant.css'
 
-type Message = { role: 'user' | 'assistant'; content: string }
+type Action = { label: string; page: Page }
+type Message = {
+  role: 'user' | 'assistant'
+  content: string
+  actions?: Action[]
+  related?: { id: string; title: string }[]
+  askAi?: string          // pregunta que se puede enviar a la IA si la guía no tuvo respuesta
+  source?: 'guia' | 'ia'
+}
+type GuideAnswer = {
+  confident: boolean; answer: string; title?: string; actions: Action[]; related: { id: string; title: string }[]
+}
 
 const STARTER: Message = {
   role: 'assistant',
-  content: '¡Hola! 👋 Soy Insy, tu asistente de Insights Studio. Puedo explicarte categorización, claves de IA, Awareness, edición e insights. ¿Por dónde empezamos?',
+  content: '¡Hola! 👋 Soy Insy. Respondo con la guía de la plataforma: es instantáneo y no envía tus datos a ningún proveedor. ¿En qué te ayudo?',
 }
 
-const SUGGESTIONS = [
-  '¿Cómo se categorizan las marcas?',
-  '¿Dónde guardo o cambio mi API key?',
-  '¿Qué diferencia hay entre los dos Awareness?',
-]
+const SUGGESTIONS: Record<Page, string[]> = {
+  home: ['¿Cómo importo mi encuesta?', '¿Qué son las preguntas abiertas recomendadas?', '¿Cómo elimino un estudio?'],
+  categorize: ['¿Cómo categorizo por temas?', '¿Qué significa «Otros» y «Ninguna»?', '¿Para qué sirven los diccionarios?'],
+  dashboard: ['¿Cómo corrijo etiquetas?', '¿Cómo mido la calidad de la categorización?', '¿Cómo se generan los insights?'],
+  awareness: ['¿Qué diferencia hay entre TOM, espontáneo y ayudado?', '¿Awareness usa lo que categoricé?', '¿Cómo escribo los códigos de pregunta?'],
+  settings: ['¿Dónde guardo mi API key?', '¿Qué proveedor de IA elijo?', '¿Cómo protegen mis datos?'],
+  admin: ['¿Qué puede hacer cada rol?', '¿Cómo restablezco la contraseña de alguien?', '¿Qué políticas de seguridad puedo configurar?'],
+}
+
+/** Siguiente paso recomendado según el estado real del estudio (sin IA). */
+function nextStep(study: any): { text: string; action: Action } {
+  if (!study?.id) return { text: 'Importa tu encuesta para empezar.', action: { label: 'Ir a Inicio', page: 'home' } }
+  const classifications: { kind: string }[] = study.classifications || []
+  const open = study.suggested_questions?.length || 0
+  if (!classifications.length) {
+    return {
+      text: open ? `Detecté ${open} preguntas abiertas. Categoriza la primera.` : 'Elige una pregunta abierta y categorízala.',
+      action: { label: 'Ir a Categorización', page: 'categorize' },
+    }
+  }
+  if (classifications.some((item) => item.kind === 'brands')) {
+    return { text: 'Ya tienes marcas categorizadas: calcula el Awareness.', action: { label: 'Ir a Awareness', page: 'awareness' } }
+  }
+  return { text: 'Revisa resultados y mide la calidad de la categorización.', action: { label: 'Ir al Dashboard', page: 'dashboard' } }
+}
 
 function Robot({ size = 40 }: { size?: number }) {
   return (
@@ -36,12 +69,18 @@ export default function HelpAssistant({
   provider,
   model,
   apiKey,
+  page,
+  study,
   onOpenSettings,
+  onNavigate,
 }: {
   provider: string
   model: string
   apiKey: string
+  page: Page
+  study: any
   onOpenSettings: () => void
+  onNavigate: (page: Page) => void
 }) {
   const [open, setOpen] = useState(false)
   const [messages, setMessages] = useState<Message[]>([STARTER])
@@ -72,19 +111,51 @@ export default function HelpAssistant({
     }
   }, [])
 
-  async function sendQuestion(question: string) {
+  const setLast = (message: Message) => setMessages((current) => {
+    const copy = current.slice()
+    copy[copy.length - 1] = message
+    return copy
+  })
+
+  /** 1) Guía propia: gratis, instantánea y sin enviar datos a terceros. */
+  async function ask(question: string, article?: string) {
     const content = question.trim()
-    if (!content || busy) return
-    const next = [...messages, { role: 'user' as const, content }]
-    setMessages([...next, { role: 'assistant', content: '' }])  // burbuja vacía que se va llenando
+    if ((!content && !article) || busy) return
+    setMessages((current) => [...current, { role: 'user', content: content || 'Ver también' }, { role: 'assistant', content: '' }])
     setDraft('')
     setBusy(true)
     setNeedsKey(false)
-    const setAnswer = (text: string) => setMessages((current) => {
-      const copy = current.slice()
-      copy[copy.length - 1] = { role: 'assistant', content: text }
-      return copy
+    try {
+      const answer = await api<GuideAnswer>('/api/help/ask', {
+        method: 'POST',
+        body: JSON.stringify(article ? { article } : { question: content, page }),
+      })
+      if (answer.confident) {
+        setLast({ role: 'assistant', content: answer.answer, actions: answer.actions, related: answer.related, source: 'guia' })
+      } else {
+        setLast({
+          role: 'assistant',
+          content: 'No encontré eso en la guía de la plataforma. Puedes reformular la pregunta o, si quieres, preguntarle a la IA.',
+          related: answer.related, askAi: content,
+        })
+      }
+    } catch (error) {
+      setLast({ role: 'assistant', content: `No pude consultar la guía ahora. ${(error as Error).message}`, askAi: content })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** 2) IA opcional: solo cuando la persona lo pide de forma explícita. */
+  async function askAi(question: string) {
+    if (busy) return
+    setMessages((current) => {
+      const copy = current.map((message) => message.askAi === question ? { ...message, askAi: undefined } : message)
+      return [...copy, { role: 'assistant', content: '', source: 'ia' }]
     })
+    setBusy(true)
+    setNeedsKey(false)
+    const history = messages.filter((message) => message.content).slice(-11).map(({ role, content }) => ({ role, content }))
     try {
       const token = sessionStorage.getItem('insights-token')
       const headers = new Headers({ 'Content-Type': 'application/json' })
@@ -93,13 +164,12 @@ export default function HelpAssistant({
       const response = await fetch('/api/help/chat/stream', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ provider, model, messages: next.slice(-12) }),
+        body: JSON.stringify({ provider, model, messages: [...history, { role: 'user', content: question }].slice(-12) }),
       })
       if (!response.ok || !response.body) {
         const payload = await response.json().catch(() => ({ detail: response.statusText }))
-        throw new Error(typeof payload.detail === 'string' ? payload.detail : 'No se pudo consultar el asistente.')
+        throw new Error(typeof payload.detail === 'string' ? payload.detail : 'No se pudo consultar a la IA.')
       }
-      // La respuesta llega por eventos «data: {...}» separados por una línea en blanco
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
@@ -115,14 +185,14 @@ export default function HelpAssistant({
           if (!line.startsWith('data:')) continue
           const event = JSON.parse(line.slice(5).trim())
           if (event.error) throw new Error(event.error)
-          if (event.delta) { text += event.delta; setAnswer(text) }
+          if (event.delta) { text += event.delta; setLast({ role: 'assistant', content: text, source: 'ia' }) }
         }
       }
-      if (!text) setAnswer('No pude preparar una respuesta. Intenta reformular la pregunta.')
+      if (!text) setLast({ role: 'assistant', content: 'No pude preparar una respuesta. Intenta reformular la pregunta.', source: 'ia' })
     } catch (error) {
       const detail = (error as Error).message
       if (/API key|clave/i.test(detail)) setNeedsKey(true)
-      setAnswer(`No pude responder ahora. ${detail}`)
+      setLast({ role: 'assistant', content: `No pude responder con la IA. ${detail}`, source: 'ia' })
     } finally {
       setBusy(false)
     }
@@ -130,8 +200,16 @@ export default function HelpAssistant({
 
   function submit(event: FormEvent) {
     event.preventDefault()
-    void sendQuestion(draft)
+    void ask(draft)
   }
+
+  function go(target: Page) {
+    onNavigate(target)
+    setOpen(false)
+  }
+
+  const step = nextStep(study)
+  const lastMessage = messages[messages.length - 1]
 
   return (
     <div className="help-assistant-root">
@@ -139,13 +217,37 @@ export default function HelpAssistant({
         <section className="help-chat-panel" aria-label="Asistente de ayuda">
           <header className="help-chat-header">
             <span className="help-chat-mark"><Robot size={28} /></span>
-            <div><b>Insy · Asistente de Insights</b><small>Guía de la plataforma · {provider}</small></div>
+            <div><b>Insy · Asistente de Insights</b><small>Guía de la plataforma · sin IA por defecto</small></div>
             <button type="button" className="help-chat-close" onClick={() => setOpen(false)} aria-label="Cerrar asistente"><X size={17} /></button>
           </header>
           <div className="help-chat-messages" aria-live="polite">
             {messages.map((message, index) => !message.content ? null : (
               <div key={`${index}-${message.role}`} className={`help-chat-message ${message.role}`}>
                 <span>{message.content}</span>
+                {message.role === 'assistant' && message.source && (
+                  <small className="help-chat-source">{message.source === 'guia' ? 'Guía de la plataforma' : `Respuesta de la IA · ${provider}`}</small>
+                )}
+                {message.actions?.map((action) => (
+                  <button key={action.label} className="help-chat-action" type="button" onClick={() => go(action.page)}>
+                    {action.label} <ArrowRight size={13} />
+                  </button>
+                ))}
+                {message.askAi && (
+                  <button
+                    className="help-chat-ai-button" type="button" disabled={busy} onClick={() => void askAi(message.askAi as string)}
+                    title={`Se enviará solo tu pregunta al proveedor ${provider}. Se ocultan correos y teléfonos.`}
+                  >
+                    <Sparkles size={13} /> Preguntar a la IA
+                  </button>
+                )}
+                {message.related && message.related.length > 0 && (
+                  <div className="help-chat-related">
+                    <small>Ver también</small>
+                    {message.related.map((item) => (
+                      <button key={item.id} type="button" disabled={busy} onClick={() => void ask(item.title, item.id)}>{item.title}</button>
+                    ))}
+                  </div>
+                )}
                 {message.role === 'assistant' && needsKey && index === messages.length - 1 && (
                   <button className="help-chat-settings-link" type="button" onClick={onOpenSettings}>
                     <Settings2 size={14} /> Abrir Ajustes <ArrowRight size={13} />
@@ -154,21 +256,29 @@ export default function HelpAssistant({
               </div>
             ))}
             {messages.length === 1 && !busy && (
-              <div className="help-chat-suggestions">
-                {SUGGESTIONS.map((question) => (
-                  <button key={question} type="button" onClick={() => void sendQuestion(question)}>{question}</button>
-                ))}
-              </div>
+              <>
+                <div className="help-chat-nextstep">
+                  <small>SIGUIENTE PASO RECOMENDADO</small>
+                  <span>{step.text}</span>
+                  <button type="button" onClick={() => go(step.action.page)}>{step.action.label} <ArrowRight size={13} /></button>
+                </div>
+                <div className="help-chat-suggestions">
+                  {SUGGESTIONS[page].map((question) => (
+                    <button key={question} type="button" onClick={() => void ask(question)}>{question}</button>
+                  ))}
+                </div>
+              </>
             )}
-            {busy && !messages[messages.length - 1]?.content && <div className="help-chat-thinking"><LoaderCircle className="spin" size={14} /> Preparando respuesta…</div>}
+            {busy && !lastMessage?.content && <div className="help-chat-thinking"><LoaderCircle className="spin" size={14} /> {lastMessage?.source === 'ia' ? 'Consultando a la IA…' : 'Buscando en la guía…'}</div>}
             <div ref={bottomRef} />
           </div>
           <form className="help-chat-composer" onSubmit={submit}>
             <textarea
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void ask(draft) } }}
               placeholder="Pregunta sobre una parte de la plataforma…"
-              maxLength={2000}
+              maxLength={500}
               rows={2}
               aria-label="Pregunta para el asistente"
             />
@@ -176,7 +286,7 @@ export default function HelpAssistant({
               {busy ? <LoaderCircle className="spin" size={17} /> : <Send size={16} />}
             </button>
           </form>
-          <div className="help-chat-footnote">Usa el proveedor/modelo seleccionado. No compartas claves ni datos sensibles.</div>
+          <div className="help-chat-footnote">La IA solo se usa si pulsas «Preguntar a la IA». No compartas claves ni datos sensibles.</div>
         </section>
       )}
 

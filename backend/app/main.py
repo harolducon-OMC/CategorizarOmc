@@ -14,18 +14,21 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 
+from . import accounts, policies
 from .awareness_flex import router as awareness_flex_router
 from .common import _class_or_404, _labels_without_blank_responses, get_current_user_id  # noqa: F401  (compatibilidad con pruebas e importaciones previas)
-from .db import Base, engine
+from .db import Base, SessionLocal, engine
 from .observability import init_sentry, init_tracing, request_id_ctx, setup_logging
-from .routers import auth, classifications, study_awareness, studies, system
-from .security import token_subject, validate_security_config
+from .routers import admin, auth, classifications, study_awareness, studies, system
+from .security import token_claims, validate_security_config
 
 setup_logging()
 init_sentry()
 logger = logging.getLogger("insights.api")
 SLOW_REQUEST_SECONDS = float(os.getenv("SLOW_REQUEST_SECONDS", "5"))
+PASSWORD_CHANGE_PATHS = {"/api/auth/change-password", "/api/auth/me"}
 
 app = FastAPI(title="Plataforma de Insights API", version="1.0.0")
 
@@ -40,10 +43,26 @@ async def security_middleware(request: Request, call_next):
     if path.startswith("/api/") and request.method != "OPTIONS" and not public:
         auth_header = request.headers.get("Authorization", "")
         scheme, _, token = auth_header.partition(" ")
-        email = token_subject(token) if scheme.lower() == "bearer" else None
-        if not email:
-            return JSONResponse({"detail": "Se requiere un token de acceso válido."}, status_code=401, headers={"X-Request-ID": request_id})
-        request.state.user_email = email
+        claims = token_claims(token) if scheme.lower() == "bearer" else None
+        denied = lambda status_code, detail, code=None: JSONResponse(  # noqa: E731
+            {"detail": detail, **({"code": code} if code else {})}, status_code=status_code, headers={"X-Request-ID": request_id})
+        if not claims:
+            return denied(401, "Se requiere un token de acceso válido.")
+        # Cada petición valida el estado actual de la cuenta (caché corta): banear o inactivar surte efecto casi de inmediato
+        status = await run_in_threadpool(accounts.account_status, claims["sub"])
+        if status is None:
+            return denied(401, "La sesión no corresponde a un usuario activo.", "session_invalid")
+        if int(claims.get("tv", 0)) != status["token_version"]:
+            return denied(401, "Tu sesión ya no es válida. Inicia sesión de nuevo.", "session_invalid")
+        if status["banned"]:
+            return denied(403, "Tu cuenta está suspendida por incumplir las políticas de la plataforma. Contacta al administrador.", "account_banned")
+        if not status["active"]:
+            return denied(403, "Tu cuenta está inactiva. Contacta al administrador.", "account_inactive")
+        if status["must_change_password"] and path not in PASSWORD_CHANGE_PATHS:
+            return denied(403, "Debes cambiar tu contraseña temporal antes de continuar.", "password_change_required")
+        request.state.user_email = claims["sub"]
+        request.state.user_role = status["role"]
+        request.state.must_change_password = status["must_change_password"]
     response = await call_next(request)
     elapsed = time.monotonic() - started
     if response.status_code >= 500:
@@ -70,7 +89,7 @@ async def unhandled_error(request: Request, exc: Exception):
 
 init_tracing(app, engine)
 app.include_router(awareness_flex_router)
-for _router_module in (auth, system, studies, classifications, study_awareness):
+for _router_module in (auth, admin, system, studies, classifications, study_awareness):
     app.include_router(_router_module.router)
 
 
@@ -92,3 +111,11 @@ def create_tables():
     validate_security_config()
     if os.getenv("AUTO_CREATE_TABLES", "1") != "0":
         Base.metadata.create_all(bind=engine)
+        with engine.begin() as connection:
+            accounts.ensure_schema(connection)  # columnas nuevas de «users» en bases que ya existían
+    try:
+        with SessionLocal() as db:
+            accounts.ensure_super_admin(db)
+        policies.get_policy()  # carga las políticas y aplica las que afectan al motor de IA
+    except Exception:
+        logger.exception("No se pudo completar la inicialización de cuentas y políticas")

@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Database } from 'lucide-react'
 import { api } from '../api'
+import { ChangeMyPassword } from '../components/ChangeMyPassword'
 import { PageHeading } from '../components/common'
+import './admin.css'
 import { PROVIDERS } from '../constants'
 
 export function SettingsPage({ provider, model, apiKey, setApiKey, onProvider, setModel, onKeysChanged }: any) {
@@ -38,5 +40,6 @@ export function SettingsPage({ provider, model, apiKey, setApiKey, onProvider, s
       <div className="inline-actions"><button className="button-primary" onClick={saveKey} disabled={busy || !keyInput.trim()}>{busy ? 'Guardando…' : configured ? 'Guardar nueva clave' : 'Guardar clave'}</button>{configured && <button className="button-secondary" onClick={deleteKey} disabled={busy}>Eliminar clave</button>}</div>
       {message && <div className="auth-error" role="status">{message}</div>}
       <div className="info-callout"><Database size={16} /><span>La clave se cifra en el backend y solo se devuelve al proveedor al ejecutar una tarea. Nunca se muestra de nuevo en la interfaz.</span></div><div className="provider-note"><b>Nota de privacidad</b><p>Al clasificar o generar insights, las respuestas seleccionadas y tu clave se usan para llamar al proveedor elegido. La clave cifrada se guarda vinculada a tu usuario.</p></div></section><aside className="card side-info-card"><div className="card-label">ESTADO LOCAL</div><h3>Tu entorno de desarrollo</h3><div className="setting-status"><span className="online-dot" /> <div><b>PostgreSQL</b><small>Claves cifradas guardadas por usuario y proveedor</small></div></div><div className="setting-status"><span className="online-dot" /> <div><b>FastAPI</b><small>Documentación interactiva en /docs</small></div></div><div className="setting-status"><span className="online-dot" /> <div><b>React + Vite</b><small>Desarrollo local con recarga</small></div></div></aside></div>
+      <ChangeMyPassword />
   </>
 }

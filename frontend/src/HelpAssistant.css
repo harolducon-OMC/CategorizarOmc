@@ -58,3 +58,20 @@
   .help-assistant-toggle,.robot-eye,.robot-antenna,.help-greeting{animation:none}
   .help-assistant-toggle:hover .robot{animation:none}
 }
+
+/* Insy v2: guía propia, acciones, «ver también», siguiente paso y botón de IA opcional */
+.help-chat-source{display:block;margin-top:6px;font-size:9px;color:#8a94a5}
+.help-chat-message.user .help-chat-source{color:#dbe4ff}
+.help-chat-action,.help-chat-ai-button{display:inline-flex;align-items:center;gap:5px;margin:8px 6px 0 0;padding:6px 10px;border-radius:8px;font-size:10.5px;font-weight:700;cursor:pointer}
+.help-chat-action{border:1px solid #c9d6f6;background:#fff;color:#315bdb}
+.help-chat-action:hover{background:#f3f6ff}
+.help-chat-ai-button{border:1px dashed #b7c3e6;background:#fbfcff;color:#4563b1}
+.help-chat-ai-button:hover:not(:disabled){background:#f3f6ff}
+.help-chat-related{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;align-items:center}
+.help-chat-related small{width:100%;font-size:9px;color:#8a94a5;text-transform:uppercase;letter-spacing:.04em}
+.help-chat-related button{padding:4px 9px;border:1px solid #dce4f4;border-radius:999px;background:#fff;color:#4563b1;font-size:10px;cursor:pointer}
+.help-chat-related button:hover:not(:disabled){background:#f3f6ff}
+.help-chat-nextstep{display:grid;gap:5px;padding:11px 12px;border:1px solid #d7e1fb;border-radius:11px;background:#f5f8ff}
+.help-chat-nextstep small{font-size:9px;font-weight:700;letter-spacing:.06em;color:#6a7fb5}
+.help-chat-nextstep span{font-size:11px;line-height:1.45;color:#2b3b5a}
+.help-chat-nextstep button{justify-self:start;display:inline-flex;align-items:center;gap:5px;padding:6px 11px;border:0;border-radius:8px;background:#315bdb;color:#fff;font-size:10.5px;font-weight:700;cursor:pointer}

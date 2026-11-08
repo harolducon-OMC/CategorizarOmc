@@ -1,20 +1,23 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
-import { Activity, BarChart3, ChevronDown, CircleHelp, Database, LayoutDashboard, KeyRound, Settings2, Tags, UsersRound, X } from 'lucide-react'
+import { Activity, BarChart3, ChevronDown, CircleHelp, Database, LayoutDashboard, KeyRound, Settings2, ShieldCheck, Tags, UsersRound, X } from 'lucide-react'
 import { api } from './api'
 import { NavButton } from './components/common'
 import { PROVIDERS } from './constants'
 import { AuthPage } from './pages/AuthPage'
 import { HomePage } from './pages/HomePage'
-import type { Page, Study, Classification } from './types'
+import type { Page, Study, Classification, Role } from './types'
 import HelpAssistant from './HelpAssistant'
 import { PageSkeleton } from './components/Skeleton'
 import { setVitalsPage } from './vitals'
+import { PASSWORD_CHANGE_REQUIRED, SESSION_ENDED } from './authEvents'
+import { ChangePasswordScreen } from './pages/ChangePasswordScreen'
 import './AwarenessExtras.css'
 
 // Cada pantalla pesada se descarga solo cuando se abre (el JS inicial es mucho más pequeño)
 const AwarenessHub = lazy(() => import('./pages/AwarenessHub').then((m) => ({ default: m.AwarenessHub })))
 const DashboardPage = lazy(() => import('./pages/DashboardPage').then((m) => ({ default: m.DashboardPage })))
 const SettingsPage = lazy(() => import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })))
+const AdminPage = lazy(() => import('./pages/AdminPage').then((m) => ({ default: m.AdminPage })))
 const CategorizeWorkflow = lazy(() => import('./CategorizeWorkflow'))
 
 function App() {
@@ -38,6 +41,9 @@ function App() {
   const [busy, setBusy] = useState(false)
   const [authChecked, setAuthChecked] = useState(false)
   const [userEmail, setUserEmail] = useState('')
+  const [role, setRole] = useState<Role>('user')
+  const [mustChange, setMustChange] = useState(false)
+  const [sessionNotice, setSessionNotice] = useState('')
 
   const refreshStudies = useCallback(async (preferred?: string) => {
     const list = await api<Study[]>('/api/studies')
@@ -60,7 +66,25 @@ function App() {
   useEffect(() => {
     const token = sessionStorage.getItem('insights-token')
     if (!token) { setAuthChecked(true); return }
-    api<{email: string}>('/api/auth/me').then((user) => { setUserEmail(user.email); setAuthChecked(true) }).catch(() => { sessionStorage.removeItem('insights-token'); setAuthChecked(true) })
+    api<{ email: string; role: Role; must_change_password: boolean }>('/api/auth/me')
+      .then((user) => { setUserEmail(user.email); setRole(user.role); setMustChange(user.must_change_password); setAuthChecked(true) })
+      .catch(() => { sessionStorage.removeItem('insights-token'); setAuthChecked(true) })
+  }, [])
+
+  // El servidor puede cortar la sesión (baneo, inactivación, restablecimiento) o exigir cambiar la contraseña
+  useEffect(() => {
+    const ended = (event: Event) => {
+      sessionStorage.removeItem('insights-token')
+      setUserEmail(''); setRole('user'); setMustChange(false); setStudies([]); setStudyId(''); setStudy(null)
+      setSessionNotice((event as CustomEvent<string>).detail || '')
+    }
+    const passwordRequired = () => setMustChange(true)
+    window.addEventListener(SESSION_ENDED, ended)
+    window.addEventListener(PASSWORD_CHANGE_REQUIRED, passwordRequired)
+    return () => {
+      window.removeEventListener(SESSION_ENDED, ended)
+      window.removeEventListener(PASSWORD_CHANGE_REQUIRED, passwordRequired)
+    }
   }, [])
 
   useEffect(() => {
@@ -121,11 +145,19 @@ function App() {
 
   const activeClassifications: Classification[] = study?.classifications || []
   const activePageTitle: Record<Page, string> = {
-    home: 'Inicio', categorize: 'Categorización', dashboard: 'Dashboard', awareness: 'Awareness', settings: 'Ajustes',
+    home: 'Inicio', categorize: 'Categorización', dashboard: 'Dashboard', awareness: 'Awareness', settings: 'Ajustes', admin: 'Administración',
   }
 
   if (!authChecked) return <div className="auth-shell"><div className="auth-card">Validando sesión…</div></div>
-  if (!userEmail) return <AuthPage onAuthenticated={(email, token) => { sessionStorage.setItem('insights-token', token); setUserEmail(email) }} />
+  function logout() {
+    sessionStorage.removeItem('insights-token')
+    setUserEmail(''); setRole('user'); setMustChange(false); setStudies([]); setStudyId(''); setStudy(null)
+  }
+  if (!userEmail) return <AuthPage notice={sessionNotice} onAuthenticated={(email, token, info) => {
+    sessionStorage.setItem('insights-token', token)
+    setSessionNotice(''); setRole((info?.role as Role) || 'user'); setMustChange(Boolean(info?.must_change_password)); setUserEmail(email)
+  }} />
+  if (mustChange) return <ChangePasswordScreen email={userEmail} onLogout={logout} onDone={(token) => { sessionStorage.setItem('insights-token', token); setMustChange(false) }} />
 
   return (
     <div className="app-shell">
@@ -137,6 +169,7 @@ function App() {
           <NavButton active={page === 'categorize'} onClick={() => setPage('categorize')} icon={<Tags size={18} />} label="Categorización" />
           <NavButton active={page === 'dashboard'} onClick={() => setPage('dashboard')} icon={<BarChart3 size={18} />} label="Dashboard" />
           <NavButton active={page === 'awareness'} onClick={() => setPage('awareness')} icon={<UsersRound size={18} />} label="Awareness" />
+          {role !== 'user' && <NavButton active={page === 'admin'} onClick={() => setPage('admin')} icon={<ShieldCheck size={18} />} label="Administración" />}
         </nav>
         <div className="sidebar-divider" />
         <div className="workspace-label">ESTUDIO ACTIVO</div>
@@ -167,7 +200,7 @@ function App() {
             </div>
             {study && <span className="top-study"><Database size={14} /> {study.name}</span>}
             <span className="local-pill"><span className="online-dot" /> Local</span>
-            <button className="avatar" title={`Cerrar sesión (${userEmail})`} onClick={() => { sessionStorage.removeItem('insights-token'); setUserEmail(''); setStudies([]); setStudyId('') }}>{userEmail.slice(0,1).toUpperCase()}</button>
+            <button className="avatar" title={`Cerrar sesión (${userEmail})`} onClick={logout}>{userEmail.slice(0,1).toUpperCase()}</button>
           </div>
         </header>
         {notice && <div className={`toast ${notice.error ? 'toast-error' : ''}`}><span>{notice.text}</span><button onClick={() => setNotice(null)}><X size={16} /></button></div>}
@@ -181,6 +214,7 @@ function App() {
             finally { setBusy(false) }
           }} busy={busy} onDelete={deleteStudy} onGo={setPage} />}
           {page === 'categorize' && <CategorizeWorkflow study={study} apiKey={apiKey} provider={provider} model={model} onRefresh={refreshStudy} onNotice={setNotice} busy={busy} setBusy={setBusy} />}
+          {page === 'admin' && role !== 'user' && <AdminPage role={role} email={userEmail} onNotice={setNotice} />}
           {page === 'dashboard' && <DashboardPage study={study} apiKey={apiKey} provider={provider} model={model} onNotice={setNotice} />}
           {page === 'awareness' && <AwarenessHub study={study} onNotice={setNotice} />}
           {page === 'settings' && <SettingsPage provider={provider} model={model} apiKey={apiKey} setApiKey={setApiKey} onProvider={changeProvider} setModel={setModel} onKeysChanged={refreshKeys} />}
@@ -192,7 +226,10 @@ function App() {
         provider={provider}
         model={model}
         apiKey={apiKey}
+        page={page}
+        study={study}
         onOpenSettings={() => setPage('settings')}
+        onNavigate={setPage}
       />
     </div>
   )

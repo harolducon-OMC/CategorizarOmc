@@ -237,3 +237,49 @@ Desde `backend/`:
 - **Región:** pon el servicio de Render en la misma región que la base de Neon (la diferencia se nota en cada consulta).
 - **Fuentes propias:** `npm i @fontsource-variable/dm-sans @fontsource-variable/manrope` e importarlas en `main.tsx`, para quitar la dependencia de Google Fonts.
 - **Probar en celulares y redes lentas:** Chrome DevTools, pestaña Rendimiento, con «Slow 4G» y CPU 4x más lenta; o Lighthouse en modo móvil.
+
+## Insy, calidad y privacidad
+
+### Insy: guía propia primero, IA solo si la pides
+- Insy responde con una **base de conocimiento propia** (`backend/core/help_kb.py`): instantánea, gratuita y sin enviar datos a ningún proveedor. Un buscador local con palabras raíz en español elige el artículo; si la confianza es baja, Insy lo dice y ofrece el botón **«Preguntar a la IA»** (usa tu proveedor y tu clave, respuesta token a token).
+- Cada respuesta puede traer botones de navegación («Ir a Awareness»…), temas relacionados y un **siguiente paso recomendado** calculado con el estado real de tu estudio (sin IA).
+- Para ampliar la guía: agrega un artículo a `ARTICLES` en `help_kb.py` y una pregunta de ejemplo en `tests/test_help_kb.py`.
+
+### Panel de calidad de la categorización (Dashboard)
+Toma una muestra al azar (20 respuestas), te deja confirmar o corregir la etiqueta y calcula el acuerdo entre la IA y tu criterio: acuerdo exacto con intervalo de confianza, F1 global, kappa de Cohen (si cada respuesta tiene una sola etiqueta) y precisión/cobertura/F1 por categoría. Tus correcciones se aplican a la clasificación. Al clasificar se guarda la propuesta original de la IA (`classification_baselines`); las revisiones van en `classification_reviews`. Ambas tablas se crean solas al arrancar; para registrar la migración corre `alembic upgrade head`.
+
+### Privacidad y cumplimiento (orientativo, no es asesoría legal)
+- Antes de enviar texto a un proveedor de IA se ocultan correos, enlaces, tarjetas, celulares y números de documento (`backend/core/privacy.py`; se desactiva con `AI_REDACT_PII=0`). No detecta nombres propios ni otros datos: es una medida de minimización, no una anonimización.
+- Las respuestas de encuestas pueden contener datos personales. En Colombia aplica la Ley 1581 de 2012 (habeas data): necesitas autorización de los participantes para tratar sus datos y, si el proveedor de IA está en otro país, revisar las condiciones de transferencia. Consulta con el responsable de datos de tu organización.
+- Algunos planes gratuitos de proveedores de IA pueden usar los textos para mejorar sus productos (cada proveedor lo indica en Ajustes). Con datos sensibles usa un plan que no lo permita.
+- Antes de incorporar una librería o repositorio externo revisa su licencia (MIT y Apache 2.0 permiten uso comercial; GPL/AGPL pueden obligarte a publicar tu código) y su mantenimiento.
+
+## Administración de cuentas y roles
+
+**Roles.** `user` (todo registro nuevo), `admin` y `super_admin` (uno solo; la base de datos lo garantiza con un índice único).
+
+| Acción | Usuario | Administrador | Super administrador |
+|---|---|---|---|
+| Inactivar / reactivar, banear / desbanear, eliminar cuentas | — | Sí, solo sobre usuarios | Sí, sobre usuarios y administradores |
+| Restablecer contraseñas | — | Sí, solo de usuarios | Sí |
+| Editar políticas de seguridad y ver la auditoría | — | Sí | Sí |
+| Nombrar o quitar administradores | — | No | **Único** |
+
+Nadie puede actuar sobre su propia cuenta ni sobre el super administrador desde el panel. Un administrador no actúa sobre otro administrador (esa regla vive en `permission_error`, en `backend/app/accounts.py`, por si quieres cambiarla).
+
+**Puesta en marcha (una vez).**
+1. En Render define `SUPERADMIN_EMAIL=tu.correo@dominio` y redespliega. Si ya tenías cuenta, al arrancar queda como super administrador; si aún no, lo será al registrarse. Solo se asigna si todavía no hay uno.
+2. Las columnas nuevas de `users` y las tablas `security_policies` y `admin_audit_log` se crean solas al arrancar (también están en la migración `0004`: corre `alembic upgrade head`).
+3. Entra: aparece «Administración» en el menú.
+
+**Restablecer una contraseña.** El sistema genera una contraseña temporal aleatoria que el administrador ve **una sola vez** (no se guarda ni se registra). La persona entra con ella y la plataforma le exige crear una nueva antes de hacer cualquier otra cosa. El administrador nunca elige ni conoce la contraseña definitiva.
+
+**Efecto inmediato.** Inactivar, banear o restablecer una cuenta cierra sus sesiones abiertas (cada token lleva una versión que el servidor compara en cada petición; la caché de estado dura 10 segundos).
+
+**Políticas de seguridad** (Administración → Políticas): longitud mínima y complejidad de contraseña, duración de la sesión, intentos fallidos y minutos de bloqueo, registro abierto o cerrado, dominios de correo permitidos, ocultar datos personales antes de enviar texto a la IA y proveedores de IA permitidos.
+
+**Auditoría.** Cada acción administrativa queda registrada (quién, qué, sobre quién, cuándo). Nunca se guardan contraseñas.
+
+**Privacidad.** El panel muestra cuentas y cuántos estudios tiene cada una, nunca su contenido. Al eliminar una cuenta se borran también sus estudios (derecho de supresión).
+
+**Límites que conviene conocer.** La caché de estado y de políticas es por instancia: con varias instancias el cambio puede tardar unos segundos. Los administradores pueden editar políticas; si prefieres que solo lo haga el super administrador, cambia la dependencia de `update_policies` en `backend/app/routers/admin.py`. No hay creación de cuentas por parte del administrador: las personas se registran solas y, si cierras el registro en las políticas, nadie nuevo podrá entrar hasta reabrirlo.

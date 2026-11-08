@@ -11,13 +11,13 @@ const PASOS = [
   { icono: Users, titulo: 'Mide awareness de marca', texto: 'Calcula TOM, espontáneo y ayudado, integrado o con una base aparte.' },
 ]
 
-export function AuthPage({ onAuthenticated }: { onAuthenticated: (email: string, token: string) => void }) {
+export function AuthPage({ onAuthenticated, notice = '' }: { onAuthenticated: (email: string, token: string, info?: { role?: string; must_change_password?: boolean }) => void; notice?: string }) {
   const [mode, setMode] = useState<'login' | 'register'>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [passwordActive, setPasswordActive] = useState(false)
-  const [error, setError] = useState('')
+  const [error, setError] = useState(notice)
   const [busy, setBusy] = useState(false)
   const eyeLeft = useRef<SVGCircleElement>(null)
   const eyeRight = useRef<SVGCircleElement>(null)
@@ -48,11 +48,11 @@ export function AuthPage({ onAuthenticated }: { onAuthenticated: (email: string,
     setError('')
     setBusy(true)
     try {
-      const data = await api<{ access_token: string; email: string }>(`/api/auth/${mode}`, {
+      const data = await api<{ access_token: string; email: string; role?: string; must_change_password?: boolean }>(`/api/auth/${mode}`, {
         method: 'POST',
         body: JSON.stringify({ email, password }),
       })
-      onAuthenticated(data.email, data.access_token)
+      onAuthenticated(data.email, data.access_token, { role: data.role, must_change_password: data.must_change_password })
     } catch (err) {
       setError((err as Error).message)
     } finally {

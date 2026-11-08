@@ -1,6 +1,7 @@
 import io
 import json
 import pandas as pd
+from .policies import provider_allowed
 from .cache import MAX_CACHED_CELLS, MISSING, frame_cache
 from fastapi import HTTPException, UploadFile
 from sqlalchemy import select
@@ -128,6 +129,8 @@ def get_user_id(db: Session, email: str) -> str:
 def create_llm(provider: str, model: str, api_key: str | None) -> LLM:
     if provider not in PROVIDER_CONFIG:
         raise HTTPException(400, "Proveedor de IA no reconocido.")
+    if not provider_allowed(provider):
+        raise HTTPException(403, "La política de seguridad de tu organización no permite este proveedor de IA. Elige otro en Ajustes.")
     if not api_key:
         raise HTTPException(400, "Escribe una API key en Ajustes para llamar al modelo.")
     try:

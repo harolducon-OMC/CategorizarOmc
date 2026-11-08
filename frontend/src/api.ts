@@ -1,3 +1,4 @@
+import { reportAuthFailure } from './authEvents'
 async function request<T>(path: string, options: RequestInit = {}, apiKey = ''): Promise<T> {
   const headers = new Headers(options.headers)
   const accessToken = sessionStorage.getItem("insights-token")
@@ -9,7 +10,8 @@ async function request<T>(path: string, options: RequestInit = {}, apiKey = ''):
   const response = await fetch(path, { ...options, headers })
   if (!response.ok) {
     const body = await response.json().catch(() => ({ detail: response.statusText }))
-    throw new Error(body.detail || 'Ocurrió un error al consultar el servidor.')
+    reportAuthFailure(response.status, body, path)
+    throw new Error(typeof body.detail === 'string' ? body.detail : 'Ocurrió un error al consultar el servidor.')
   }
   return response.json() as Promise<T>
 }

@@ -1,4 +1,5 @@
-export type Page = 'home' | 'categorize' | 'dashboard' | 'awareness' | 'settings'
+export type Page = 'home' | 'categorize' | 'dashboard' | 'awareness' | 'settings' | 'admin'
+export type Role = 'user' | 'admin' | 'super_admin'
 
 export type Study = { id: string; name: string; source_filename: string; columns: string[]; row_count: number; created_at: string }
 

@@ -43,9 +43,14 @@ Información verificada de la plataforma:
 - TOM (Top of Mind) representa la primera marca mencionada cuando está activa la opción correspondiente.
   La lista evaluada solo cuenta marcas configuradas; las menciones fuera de ella se deben revisar antes
   de agregarlas porque pueden incluir variantes o texto que no sea una marca.
-- El asistente de ayuda usa el proveedor/modelo seleccionado y puede responder algunas preguntas frecuentes
-  sin una API key; las preguntas abiertas requieren una clave guardada o temporal. El historial del chat no
-  se persiste en la base de datos.
+- Insy responde primero con una guía propia de la plataforma, sin IA y sin enviar datos a terceros. Solo si
+  la guía no tiene la respuesta, el usuario puede pedir explícitamente preguntarle a la IA, que usa el
+  proveedor/modelo seleccionado y requiere una clave guardada o temporal. El historial del chat no se
+  persiste en la base de datos.
+- Antes de enviar texto a un proveedor de IA se ocultan correos, enlaces, teléfonos y números de documento.
+- El Awareness integrado muestra, por columna, si usa la categorización guardada o el texto original
+  («Fuente de los datos»). En el Dashboard, el panel «Calidad de la categorización» mide el acuerdo entre
+  la IA y las correcciones del usuario sobre una muestra al azar.
 - Cada estudio pertenece a una cuenta. El usuario solo puede listar, consultar, editar, exportar o
   borrar sus propios estudios y clasificaciones. Los estudios de la base previa a esta mejora quedan
   temporalmente sin dueño y ocultos hasta que se les asigne una cuenta en la migración.
@@ -110,7 +115,7 @@ def answer_without_model(messages):
         return (
             "Awareness integrado usa un estudio ya cargado y las marcas detectadas/corregidas en Categorización. "
             "Awareness independiente recibe su propio CSV/XLSX y no exige crear un estudio ni categorizar antes. "
-            "Ambos permiten descargar el gráfico como PNG, la tabla como CSV y el reporte completo como Excel."
+            "Ambos permiten descargar el gráfico y la tabla como imágenes PNG; el independiente además genera el reporte completo en Excel."
         )
 
     if "tom" in question or "top of mind" in question or any(term in question for term in ("espontanea", "espontaneo", "ayudada", "ayudado")):
@@ -144,8 +149,8 @@ def answer_without_model(messages):
 
     if any(term in question for term in ("descargar", "exportar", "grafico", "tabla")):
         return (
-            "Tras calcular Awareness, cada análisis tiene botones para descargar su gráfico como PNG y su tabla "
-            "como CSV. El botón de cálculo del Awareness independiente también descarga el reporte completo en Excel."
+            "Tras calcular Awareness, cada análisis tiene botones para descargar su gráfico y su tabla como "
+            "imágenes PNG. El Awareness independiente también genera el reporte completo en Excel."
         )
 
     if any(term in question for term in ("cargar", "subir", "archivo", "excel", "csv")):

@@ -9,16 +9,17 @@ from io import BytesIO
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Form, Header, HTTPException, Request
+from pydantic import BaseModel, Field
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, defer
 
-from core import brands, coding, export, insights
+from core import brands, coding, export, insights, quality
 from ..cache import result_cache
 from ..common import (_api_key_for_user, _class_or_404, _classification_json,
                       _labels_without_blank_responses, get_current_user_id)
 from ..db import get_db
-from ..models import Classification, ClassificationDraft, Respondent
+from ..models import Classification, ClassificationBaseline, ClassificationDraft, ClassificationReview, Respondent
 from ..ratelimit import limit_by_user
 from ..schemas import ClassifyRequest, LabelsBatchEdit, ProposeRequest
 from ..services import create_llm, dataframe_for_study, get_study
@@ -133,6 +134,7 @@ def classify_question(
     ))
     if draft is not None:
         db.delete(draft)
+    _save_quality_baseline(db, item, labels)
     db.commit()
     db.refresh(item)
     return {**_classification_json(item), "stats": stats}
@@ -207,6 +209,147 @@ def edit_labels(
     item.updated_at = datetime.now(timezone.utc)
     db.commit()
     return {"saved": len(request.changes) - skipped_blank, "skipped_blank": skipped_blank, "updated_at": item.updated_at.isoformat()}
+
+
+def _save_quality_baseline(db: Session, item: Classification, labels) -> None:
+    """Guarda lo que decidió la IA para poder medir luego cuánto corrigió la persona.
+
+    Al reclasificar, la línea base se reemplaza y se descartan las revisiones anteriores.
+    Si falla (p. ej. tablas sin crear) la clasificación continúa sin panel de calidad.
+    """
+    try:
+        with db.begin_nested():
+            db.flush()
+            snapshot = [list(row or []) for row in labels]
+            baseline = db.get(ClassificationBaseline, item.id)
+            if baseline is None:
+                db.add(ClassificationBaseline(classification_id=item.id, labels=snapshot))
+            else:
+                baseline.labels = snapshot
+                baseline.created_at = datetime.now(timezone.utc)
+            db.execute(delete(ClassificationReview).where(ClassificationReview.classification_id == item.id))
+    except Exception:
+        logger.warning("No se pudo guardar la línea base de calidad", exc_info=True)
+
+
+def _allowed_labels(item: Classification) -> set:
+    allowed = set(item.categories)
+    if item.kind == "brands":
+        allowed.update([brands.NINGUNA_LABEL, brands.OTHER_BRAND_LABEL, coding.NSNR_LABEL])
+    if item.kind in ("themes", "sentiment"):
+        allowed.update([coding.OTHER, coding.NSNR_LABEL])
+    return allowed
+
+
+class QualityReviewItem(BaseModel):
+    row_index: int = Field(ge=0)
+    labels: list[str] = Field(default_factory=list, max_length=30)
+
+
+class QualityReviewRequest(BaseModel):
+    reviews: list[QualityReviewItem] = Field(min_length=1, max_length=200)
+
+
+def _quality_payload(db: Session, item: Classification) -> dict:
+    reviews = db.scalars(select(ClassificationReview).where(ClassificationReview.classification_id == item.id)).all()
+    metrics = quality.compute_quality([(review.ai_labels, review.human_labels) for review in reviews])
+    metrics["baseline_available"] = db.get(ClassificationBaseline, item.id) is not None
+    return metrics
+
+
+@router.get("/api/classifications/{classification_id}/quality")
+def classification_quality(
+    classification_id: str, db: Session = Depends(get_db), owner_id: str = Depends(get_current_user_id),
+):
+    """Acuerdo entre la IA y la revisión humana, en total y por categoría."""
+    item = _class_or_404(db, classification_id, owner_id)
+    return _quality_payload(db, item)
+
+
+@router.get(
+    "/api/classifications/{classification_id}/quality/sample",
+    dependencies=[Depends(limit_by_user("quality", 60, 600))],
+)
+def classification_quality_sample(
+    classification_id: str, n: int = 30, db: Session = Depends(get_db),
+    owner_id: str = Depends(get_current_user_id),
+):
+    """Muestra al azar de respuestas aún no revisadas para confirmar o corregir su etiqueta."""
+    item = _class_or_404(db, classification_id, owner_id)
+    get_study(db, item.study_id, owner_id)
+    labels = item.labels or []
+    texts = db.execute(
+        select(Respondent.row_index, Respondent.data[item.question].as_string())
+        .where(Respondent.study_id == item.study_id).order_by(Respondent.row_index)
+    ).all()
+    text_by_row = {row_index: text for row_index, text in texts}
+    candidates = [
+        index for index, text in text_by_row.items()
+        if index < len(labels) and not coding.is_blank_response(text)
+    ]
+    reviewed = db.scalars(select(ClassificationReview.row_index).where(ClassificationReview.classification_id == item.id)).all()
+    chosen = quality.pick_sample(candidates, reviewed, max(1, min(n, 100)))
+    baseline = db.get(ClassificationBaseline, item.id)
+    ai_source = baseline.labels if baseline is not None else labels
+    extras = sorted(_allowed_labels(item) - set(item.categories))
+    return {
+        "rows": [
+            {"row_index": index, "response": str(text_by_row[index])[:1200],
+             "ai_labels": list(ai_source[index] if index < len(ai_source) else labels[index] or []),
+             "labels": list(labels[index] or [])}
+            for index in chosen
+        ],
+        "categories": [*item.categories, *extras],
+        "baseline_available": baseline is not None,
+        "pending": max(0, len(set(candidates) - set(reviewed)) - len(chosen)),
+    }
+
+
+@router.put(
+    "/api/classifications/{classification_id}/quality/reviews",
+    dependencies=[Depends(limit_by_user("quality", 60, 600))],
+)
+def save_quality_reviews(
+    classification_id: str, request: QualityReviewRequest, db: Session = Depends(get_db),
+    owner_id: str = Depends(get_current_user_id),
+):
+    """Guarda las etiquetas finales de la muestra, las aplica a la clasificación y recalcula la calidad."""
+    item = _class_or_404(db, classification_id, owner_id)
+    allowed = _allowed_labels(item)
+    labels_by_row = [list(row or []) for row in (item.labels or [])]
+    baseline = db.get(ClassificationBaseline, item.id)
+    saved_rows = {
+        review.row_index: review for review in db.scalars(select(ClassificationReview).where(
+            ClassificationReview.classification_id == item.id,
+            ClassificationReview.row_index.in_([change.row_index for change in request.reviews]),
+        )).all()
+    }
+    for change in request.reviews:
+        if change.row_index >= len(labels_by_row):
+            raise HTTPException(400, f"La fila {change.row_index} no existe.")
+        invalid = set(change.labels) - allowed
+        if invalid:
+            raise HTTPException(400, f"Categorías no válidas: {', '.join(sorted(invalid))}")
+        human = list(dict.fromkeys(change.labels))
+        exclusive = next((label for label in human if label in (coding.NSNR_LABEL, brands.NINGUNA_LABEL)), None)
+        human = [exclusive] if exclusive else human
+        ai = list(baseline.labels[change.row_index]) if baseline is not None and change.row_index < len(baseline.labels) \
+            else list(labels_by_row[change.row_index])
+        review = saved_rows.get(change.row_index)
+        if review is None:
+            db.add(ClassificationReview(
+                id=__import__("uuid").uuid4().hex, classification_id=item.id, row_index=change.row_index,
+                ai_labels=ai, human_labels=human,
+            ))
+        else:
+            review.human_labels = human
+            review.reviewed_at = datetime.now(timezone.utc)
+        labels_by_row[change.row_index] = human
+    item.labels = labels_by_row
+    item.insights = None
+    item.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    return {"saved": len(request.reviews), **_quality_payload(db, item)}
 
 
 @router.get("/api/classifications/{classification_id}/frequencies")
