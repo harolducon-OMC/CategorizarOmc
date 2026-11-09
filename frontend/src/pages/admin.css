@@ -1,33 +1,84 @@
-.admin-page{display:grid;gap:14px}
-.admin-tabs{display:flex;gap:6px;border-bottom:1px solid #e7ebf2}
-.admin-tabs button{padding:9px 14px;border:0;border-bottom:2px solid transparent;background:transparent;color:#6b778c;font-size:12px;font-weight:600;cursor:pointer}
+/* ===== Layout general ===== */
+.admin-page{display:grid;gap:18px;width:100%;max-width:1120px;margin:0 auto}
+
+/* ===== Encabezado centrado ===== */
+.admin-page .admin-heading{display:block;text-align:center;padding:10px 0 4px}
+.admin-heading .eyebrow{margin-bottom:6px;letter-spacing:.14em}
+.admin-heading h1{margin:0;font-size:30px;letter-spacing:-.02em}
+
+/* ===== Pestañas ===== */
+.admin-tabs{display:flex;justify-content:center;gap:4px;border-bottom:1px solid #e7ebf2}
+.admin-tabs button{padding:11px 18px;border:0;border-bottom:2px solid transparent;background:transparent;color:#6b778c;font-size:12.5px;font-weight:600;cursor:pointer;transition:color .15s,border-color .15s}
+.admin-tabs button:hover{color:#26334a}
 .admin-tabs button.active{color:#315bdb;border-bottom-color:#315bdb}
-.admin-card{margin-top:2px}
-.admin-toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
-.admin-toolbar small{color:#8a94a5;margin-left:auto}
-.admin-search{display:flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid #dfe5ee;border-radius:9px;background:#fff;color:#8a94a5}
-.admin-search input{border:0;outline:0;font-size:12px;min-width:210px;background:transparent}
-.admin-toolbar select{padding:7px 10px;border:1px solid #dfe5ee;border-radius:9px;font-size:12px;background:#fff}
-.admin-table td,.admin-table th{font-size:11px;padding:9px 10px;vertical-align:middle}
+
+/* ===== Tarjeta ===== */
+.admin-card{margin-top:2px;padding:20px 22px;border-radius:14px;box-shadow:0 1px 2px rgba(20,32,60,.04),0 6px 20px rgba(20,32,60,.04)}
+
+/* ===== Barra de herramientas ===== */
+.admin-toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
+.admin-toolbar small{color:#8a94a5;margin-left:auto;font-size:11.5px;font-weight:600}
+.admin-search{display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid #dfe5ee;border-radius:10px;background:#fff;color:#8a94a5;transition:border-color .15s,box-shadow .15s}
+.admin-search:focus-within{border-color:#315bdb;box-shadow:0 0 0 3px rgba(49,91,219,.12)}
+.admin-search input{border:0;outline:0;font-size:12.5px;min-width:240px;background:transparent}
+.admin-toolbar select{padding:8px 12px;border:1px solid #dfe5ee;border-radius:10px;font-size:12.5px;background:#fff;cursor:pointer}
+
+/* ===== Tablas (usuarios y auditoría) ===== */
+.admin-table{width:100%;border-collapse:separate;border-spacing:0}
+.admin-table th{font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#7b869a;background:#f6f8fc;padding:11px 14px;text-align:left;border-top:1px solid #e7ebf2;border-bottom:1px solid #e7ebf2}
+.admin-table th:first-child{border-left:1px solid #e7ebf2;border-top-left-radius:10px}
+.admin-table th:last-child{border-right:1px solid #e7ebf2;border-top-right-radius:10px}
+.admin-table td{font-size:12px;padding:14px;vertical-align:middle;border-bottom:1px solid #eef1f6;color:#26334a}
+.admin-table tbody tr{transition:background .12s}
+.admin-table tbody tr:hover{background:#fafbfe}
+.admin-table tbody tr:last-child td{border-bottom:0}
 .admin-flag{color:#a05a00}
-.admin-badge{display:inline-block;padding:3px 9px;border-radius:999px;font-size:10px;font-weight:700}
-.admin-badge.role-user{background:#eef1f6;color:#4a566c}.admin-badge.role-admin{background:#e8efff;color:#2c52c4}.admin-badge.role-super_admin{background:#f1e9ff;color:#6a3bb8}
-.admin-badge.st-active{background:#e8f7f2;color:#1f7a63}.admin-badge.st-inactive{background:#fff4e0;color:#8a5a00}.admin-badge.st-banned{background:#fdeceb;color:#b3382c}
-.admin-actions{display:flex;gap:5px;flex-wrap:wrap}
-.admin-actions button{display:inline-flex;align-items:center;gap:4px;padding:4px 8px;border:1px solid #dce4f4;border-radius:7px;background:#fff;color:#3d5aa8;font-size:10px;font-weight:600;cursor:pointer}
-.admin-actions button:hover{background:#f3f6ff}.admin-actions button.danger{color:#b3382c;border-color:#f0c9c4}.admin-actions button.danger:hover{background:#fff4f2}
-.admin-temp{display:grid;gap:6px;margin:0 0 14px;padding:13px 15px;border:1px solid #f1d49a;border-radius:11px;background:#fff9ec}
-.admin-temp code{display:block;padding:9px 11px;border-radius:8px;background:#fff;border:1px dashed #e0b866;font-size:15px;letter-spacing:.04em;user-select:all}
-.admin-temp span{font-size:11px;color:#7a5200}.admin-temp div{display:flex;gap:8px}
+.admin-muted{color:#b3bccb}
+
+/* Solo la tabla de usuarios: columnas centradas y acciones a la derecha */
+.users-table th:nth-child(2),.users-table td:nth-child(2),
+.users-table th:nth-child(3),.users-table td:nth-child(3),
+.users-table th:nth-child(4),.users-table td:nth-child(4),
+.users-table th:nth-child(5),.users-table td:nth-child(5){text-align:center}
+.users-table th:last-child,.users-table td:last-child{text-align:right}
+
+/* ===== Insignias ===== */
+.admin-badge{display:inline-block;padding:4px 11px;border-radius:999px;font-size:10.5px;font-weight:700;white-space:nowrap}
+.admin-badge.role-user{background:#eef1f6;color:#4a566c}
+.admin-badge.role-admin{background:#e8efff;color:#2c52c4}
+.admin-badge.role-super_admin{background:#f1e9ff;color:#6a3bb8}
+.admin-badge.st-active{background:#e8f7f2;color:#1f7a63}
+.admin-badge.st-inactive{background:#fff4e0;color:#8a5a00}
+.admin-badge.st-banned{background:#fdeceb;color:#b3382c}
+
+/* ===== Acciones (div dentro de la celda) ===== */
+.admin-actions{display:flex;justify-content:flex-end;gap:6px;flex-wrap:wrap}
+.admin-actions button{display:inline-flex;align-items:center;gap:4px;padding:5px 10px;border:1px solid #dce4f4;border-radius:8px;background:#fff;color:#3d5aa8;font-size:10.5px;font-weight:600;cursor:pointer;transition:background .12s}
+.admin-actions button:hover{background:#f3f6ff}
+.admin-actions button.danger{color:#b3382c;border-color:#f0c9c4}
+.admin-actions button.danger:hover{background:#fff4f2}
+
+/* ===== Contraseña temporal ===== */
+.admin-temp{display:grid;gap:6px;margin:0 0 16px;padding:14px 16px;border:1px solid #f1d49a;border-radius:12px;background:#fff9ec}
+.admin-temp code{display:block;padding:10px 12px;border-radius:8px;background:#fff;border:1px dashed #e0b866;font-size:15px;letter-spacing:.04em;user-select:all}
+.admin-temp span{font-size:11px;color:#7a5200}
+.admin-temp div{display:flex;gap:8px}
+
+/* ===== Textos de ayuda / auditoría ===== */
 .admin-help{margin:10px 0 0;font-size:10.5px;color:#6b778c;line-height:1.5}
 .audit-details{max-width:340px;font-size:10px;color:#6b778c;overflow-wrap:anywhere}
+
+/* ===== Políticas ===== */
 .policy-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;margin:12px 0}
 .policy-field{display:grid;gap:5px;font-size:11px;color:#26334a;font-weight:600}
 .policy-field input[type=number],.policy-field input:not([type]){padding:8px 10px;border:1px solid #dfe5ee;border-radius:8px;font-size:12px}
-.policy-field small{font-weight:400;color:#8a94a5}.policy-field.wide{margin:12px 0}
+.policy-field small{font-weight:400;color:#8a94a5}
+.policy-field.wide{margin:12px 0}
 .policy-checks,.policy-providers{display:flex;gap:16px;flex-wrap:wrap}
 .policy-check{display:flex;align-items:center;gap:7px;font-size:11.5px;color:#26334a;font-weight:500}
 .admin-actions-row{display:flex;gap:10px;margin-top:16px}
+
+/* ===== Cambio de contraseña / errores (sin cambios) ===== */
 .change-password-card{display:grid;gap:12px;max-width:420px}
 .change-password-card label{display:grid;gap:5px;font-size:12px;font-weight:600}
 .change-password-card input{padding:10px 12px;border:1px solid #dfe5ee;border-radius:9px;font-size:13px}

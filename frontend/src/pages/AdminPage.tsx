@@ -31,10 +31,9 @@ export function AdminPage({ role, email, onNotice }: {
   const [tab, setTab] = useState<'users' | 'policies' | 'audit'>('users')
   return (
     <div className="admin-page">
-      <div className="page-heading">
+      <div className="page-heading admin-heading">
         <div className="eyebrow">ADMINISTRACIÓN</div>
         <h1>Panel de administración</h1>
-        <p>Cuentas, políticas de seguridad y registro de acciones. Aquí no se muestra el contenido de los estudios de las personas.</p>
       </div>
       <div className="admin-tabs" role="tablist">
         {([['users', 'Usuarios'], ['policies', 'Políticas de seguridad'], ['audit', 'Auditoría']] as const).map(([id, label]) => (
@@ -106,7 +105,7 @@ function UsersTab({ role, email, onNotice }: { role: Role; email: string; onNoti
         <select value={status} onChange={(event) => setStatus(event.target.value)} aria-label="Filtrar por estado">
           <option value="all">Todas</option><option value="active">Activas</option><option value="inactive">Inactivas</option><option value="banned">Baneadas</option>
         </select>
-        <small>{total} cuentas</small>
+        <small>{total} {total === 1 ? 'cuenta' : 'cuentas'}</small>
       </div>
       {temp && (
         <div className="admin-temp" role="alert">
@@ -120,7 +119,7 @@ function UsersTab({ role, email, onNotice }: { role: Role; email: string; onNoti
         </div>
       )}
       {loading && !users.length ? <TableSkeleton rows={6} /> : (
-        <div className="table-scroll"><table className="admin-table"><thead><tr><th>Correo</th><th>Rol</th><th>Estado</th><th>Estudios</th><th>Último acceso</th><th>Acciones</th></tr></thead><tbody>
+        <div className="table-scroll"><table className="admin-table users-table"><thead><tr><th>Correo</th><th>Rol</th><th>Estado</th><th>Estudios</th><th>Último acceso</th><th>Acciones</th></tr></thead><tbody>
           {users.map((user) => {
             const isSelf = user.email.toLowerCase() === email.toLowerCase()
             const canAct = !isSelf && user.role !== 'super_admin' && (role === 'super_admin' || user.role === 'user')
@@ -132,25 +131,27 @@ function UsersTab({ role, email, onNotice }: { role: Role; email: string; onNoti
                 <td><span className={`admin-badge st-${user.status}`} title={user.ban_reason ? `Motivo: ${user.ban_reason} (por ${user.banned_by})` : ''}>{STATUS_LABEL[user.status]}</span></td>
                 <td>{user.study_count}</td>
                 <td>{when(user.last_login_at)}</td>
-                <td className="admin-actions">
-                  {canAct && <>
-                    <button onClick={() => void resetPassword(user)} title="Genera una contraseña temporal"><KeyRound size={12} /> Restablecer</button>
-                    {user.status === 'banned'
-                      ? <button onClick={() => void run(() => post(user, 'unban'), 'Baneo retirado.')}>Quitar baneo</button>
-                      : <button onClick={() => ban(user)}>Banear</button>}
-                    {user.status !== 'banned' && (user.status === 'inactive'
-                      ? <button onClick={() => void run(() => post(user, 'reactivate'), 'Cuenta reactivada.')}>Reactivar</button>
-                      : <button onClick={() => void run(() => post(user, 'deactivate'), 'Cuenta inactivada.')}>Inactivar</button>)}
-                    <button className="danger" onClick={() => remove(user)}>Eliminar</button>
-                  </>}
-                  {canRole && <button onClick={() => toggleAdmin(user)}><ShieldCheck size={12} /> {user.role === 'user' ? 'Hacer administrador' : 'Quitar admin'}</button>}
+                <td>
+                  <div className="admin-actions">
+                    {canAct && <>
+                      <button onClick={() => void resetPassword(user)} title="Genera una contraseña temporal"><KeyRound size={12} /> Restablecer</button>
+                      {user.status === 'banned'
+                        ? <button onClick={() => void run(() => post(user, 'unban'), 'Baneo retirado.')}>Quitar baneo</button>
+                        : <button onClick={() => ban(user)} title="Por incumplir las políticas. Queda el motivo registrado y se cierran las sesiones.">Banear</button>}
+                      {user.status !== 'banned' && (user.status === 'inactive'
+                        ? <button onClick={() => void run(() => post(user, 'reactivate'), 'Cuenta reactivada.')}>Reactivar</button>
+                        : <button onClick={() => void run(() => post(user, 'deactivate'), 'Cuenta inactivada.')} title="Para quien ya no hace parte de la organización (reversible).">Inactivar</button>)}
+                      <button className="danger" onClick={() => remove(user)}>Eliminar</button>
+                    </>}
+                    {canRole && <button onClick={() => toggleAdmin(user)}><ShieldCheck size={12} /> {user.role === 'user' ? 'Hacer administrador' : 'Quitar admin'}</button>}
+                    {!canAct && !canRole && <span className="admin-muted">—</span>}
+                  </div>
                 </td>
               </tr>
             )
           })}
         </tbody></table></div>
       )}
-      <p className="admin-help">Inactivar es para quien ya no hace parte de la organización (reversible). Banear es por incumplir las políticas y deja el motivo. Ambas cierran las sesiones abiertas.</p>
     </div>
   )
 }
