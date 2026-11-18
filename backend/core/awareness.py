@@ -20,6 +20,8 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
+from .xlsafe import set_cell_value as _safe_set
+
 # ============================================================
 # CONFIGURACIONES PREDEFINIDAS
 # ============================================================
@@ -482,16 +484,21 @@ def demographic_sections(df, demo_cols):
             sections.append((f"Demográfico - {label}", table))
     return sections
 
-def style_sheet(ws):
-    border = Border(left=Side(style="thin", color="BFBFBF"), right=Side(style="thin", color="BFBFBF"), top=Side(style="thin", color="BFBFBF"), bottom=Side(style="thin", color="BFBFBF"))
-    for row in ws.iter_rows():
+
+# Estilos compartidos: se crean una sola vez en vez de uno nuevo por celda.
+_BORDER = Border(left=Side(style="thin", color="BFBFBF"), right=Side(style="thin", color="BFBFBF"),
+                 top=Side(style="thin", color="BFBFBF"), bottom=Side(style="thin", color="BFBFBF"))
+_CENTER = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+
+def style_sheet(ws, header_only: bool = False):
+    rows = ws.iter_rows(min_row=1, max_row=1) if header_only else ws.iter_rows()
+    for row in rows:
         for cell in row:
-            cell.border = border
-            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            cell.border = _BORDER
+            cell.alignment = _CENTER
     for col_idx in range(1, ws.max_column + 1):
         ws.column_dimensions[get_column_letter(col_idx)].width = 24
-
-from core.xlsafe import set_cell_value as _safe_set
 
 
 def write_main_sheet(wb, sheet_name, output_df):
@@ -503,7 +510,8 @@ def write_main_sheet(wb, sheet_name, output_df):
     for row_idx, row in enumerate(output_df.itertuples(index=False), start=2):
         for col_idx, value in enumerate(row, start=1):
             _safe_set(ws.cell(row_idx, col_idx), value)
-    style_sheet(ws)
+    # En la hoja de datos (miles de filas) solo se da formato al encabezado: es lo que más tiempo ahorra.
+    style_sheet(ws, header_only=True)
 
 def write_sections_sheet(wb, sheet_name, sections):
     ws = wb.create_sheet(safe_sheet_name(sheet_name))
