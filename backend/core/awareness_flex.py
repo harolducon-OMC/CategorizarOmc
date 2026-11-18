@@ -10,13 +10,17 @@ Este módulo no depende de FastAPI ni de la base de datos para poder probarse so
 """
 
 import json
+import logging
 import re
+import time
 from collections import Counter
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
 from . import awareness, brands
+
+log = logging.getLogger("awareness_flex")
 
 DEMO_KEYS = ["sexo", "edad", "departamento", "estrato", "ingreso"]
 RESERVED_ENTITIES = {"ninguna", "ninguno", "ns nr", "nsnr", "ns", "nr", "otra", "otro", "no responde", "no sabe"}
@@ -28,7 +32,8 @@ GENERIC_WORDS = {
     "drogueria", "droguerias", "drogueras", "drogas", "droga", "farmacia", "farmacias",
     "la", "el", "los", "las", "de", "del", "y", "e",
 }
-CONTAIN_MIN_LEN = 4  # una respuesta distintiva más corta que esto no se agrupa (evita ruido)
+CONTAIN_MIN_LEN = 4    # una respuesta distintiva más corta que esto no se agrupa (evita ruido)
+LENGTH_SLACK = 0.25    # no se compara por parecido si los largos difieren más de esto (no puede llegar al umbral)
 
 
 def presets() -> Dict[str, Dict[str, Any]]:
@@ -208,7 +213,10 @@ def learn_variants(frame: pd.DataFrame, config: Dict[str, Any]) -> Tuple[Dict[st
     if not config.get("fuzzy", True):
         return aliases, []
     counts, spellings = _observed(frame, _text_columns(frame, config))
-    names = {entity: {awareness.norm(entity)} | {awareness.norm(a) for a in aliases[entity]} for entity in aliases}
+    compact_forms: Dict[str, set] = {}
+    for entity, values in aliases.items():
+        forms = {awareness.norm(entity).replace(" ", "")} | {awareness.norm(a).replace(" ", "") for a in values}
+        compact_forms[entity] = {form for form in forms if len(form) >= FUZZY_MIN_LEN}
     entity_forms = {
         entity: [form for form in ([_distinctive(entity)] + [_distinctive(a) for a in aliases[entity]]) if form]
         for entity in aliases
@@ -217,31 +225,33 @@ def learn_variants(frame: pd.DataFrame, config: Dict[str, Any]) -> Tuple[Dict[st
 
     def learn(key: str, entity: str, count: int) -> None:
         aliases[entity].append(key)
-        names[entity].add(key)
+        compact = key.replace(" ", "")
+        if len(compact) >= FUZZY_MIN_LEN:
+            compact_forms[entity].add(compact)
         distinctive = _distinctive(key)
         if distinctive and distinctive not in entity_forms[entity]:
             entity_forms[entity].append(distinctive)
         learned.append({"variante": spellings[key].most_common(1)[0][0], "marca": entity, "n": int(count)})
 
     for key, count in counts.most_common():
-        if any(awareness.contains_entity(key, entity, aliases) for entity in aliases):
-            continue  # ya la reconoce un alias exacto
         if not _distinctive(key):
             continue  # solo palabras genéricas ("Droguería"): no se puede asignar a una marca
+        if any(awareness.contains_entity(key, entity, aliases) for entity in aliases):
+            continue  # ya la reconoce un alias exacto
         matched = _match_by_distinctive_name(key, entity_forms)
         if matched:
             learn(key, matched, count)
             continue
         compact = key.replace(" ", "")
-        if len(compact) < FUZZY_MIN_LEN:
+        size = len(compact)
+        if size < FUZZY_MIN_LEN:
             continue
         best, best_score = None, 0.0
-        for entity, forms in names.items():
+        for entity, forms in compact_forms.items():
             for form in forms:
-                form_compact = form.replace(" ", "")
-                if len(form_compact) < FUZZY_MIN_LEN:
-                    continue
-                score = brands.similarity(compact, form_compact)
+                if abs(size - len(form)) > LENGTH_SLACK * max(size, len(form)):
+                    continue  # con tanta diferencia de largo no puede llegar al umbral
+                score = brands.similarity(compact, form)
                 if score > best_score:
                     best, best_score = entity, score
         if best is not None and best_score >= FUZZY_THRESHOLD:
@@ -318,13 +328,19 @@ def _coverage(frame: pd.DataFrame, cfg: Dict[str, Any], indicators: pd.DataFrame
 
 def generate_report(frame: pd.DataFrame, config: Dict[str, Any]) -> bytes:
     """Excel final idéntico al de la app Streamlit original (con variantes parecidas agrupadas)."""
-    frame, config, _ = _prepare(frame, config)
+    started = time.perf_counter()
+    frame, config, learned = _prepare(frame, config)
+    grouped = time.perf_counter()
     demo_cols = {key: awareness.find_col(frame, config["demographics"].get(key, "")) for key in DEMO_KEYS}
     cfg1, cfg2 = config["analyses"]
-    return awareness.build_excel_bytes(
+    data = awareness.build_excel_bytes(
         frame, demo_cols, cfg1, cfg2, config["entities"], config["aliases"],
         config["normalizations"], config["expected_raw_cols"],
     )
+    finished = time.perf_counter()
+    log.info("Excel awareness: %d filas, %d variantes agrupadas en %.1fs, Excel armado en %.1fs",
+             len(frame), len(learned), grouped - started, finished - grouped)
+    return data
 
 
 def preview_results(frame: pd.DataFrame, config: Dict[str, Any]) -> Dict[str, Any]:
