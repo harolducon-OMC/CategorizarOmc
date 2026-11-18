@@ -1,122 +1,122 @@
+"""Límite de peticiones en memoria (ventana deslizante).
+
+Protege el login y los endpoints que consumen IA o mucho CPU. Es por proceso:
+con una sola instancia en Render (plan actual) es suficiente. Si algún día se
+escala a varias instancias, cambia el almacenamiento por Redis.
+
+Variables de entorno:
+  RATE_LIMIT_DISABLED=1   desactiva todos los límites (útil en pruebas locales).
+"""
+import math
 import os
-import unittest
-from unittest.mock import patch
-
-from app import ratelimit
-from app.ratelimit import SlidingWindowLimiter
-
-
-class FakeClock:
-    def __init__(self):
-        self.now = 1000.0
-
-    def __call__(self):
-        return self.now
+import threading
+import time
+from collections import deque
+from typing import Callable, Deque, Dict, Tuple
 
 
-class SlidingWindowLimiterTests(unittest.TestCase):
-    def test_allows_up_to_the_limit_then_blocks_with_retry_after(self):
-        clock = FakeClock()
-        limiter = SlidingWindowLimiter(clock)
-        for _ in range(3):
-            self.assertEqual(limiter.check("u", 3, 60), (True, 0))
-        allowed, retry_after = limiter.check("u", 3, 60)
-        self.assertFalse(allowed)
-        self.assertEqual(retry_after, 60)
-
-    def test_window_slides_and_allows_again(self):
-        clock = FakeClock()
-        limiter = SlidingWindowLimiter(clock)
-        for _ in range(2):
-            limiter.check("u", 2, 60)
-        self.assertFalse(limiter.check("u", 2, 60)[0])
-        clock.now += 61
-        self.assertTrue(limiter.check("u", 2, 60)[0])
-
-    def test_keys_are_independent(self):
-        limiter = SlidingWindowLimiter(FakeClock())
-        limiter.check("a", 1, 60)
-        self.assertFalse(limiter.check("a", 1, 60)[0])
-        self.assertTrue(limiter.check("b", 1, 60)[0])
-
-    def test_retry_after_counts_down(self):
-        clock = FakeClock()
-        limiter = SlidingWindowLimiter(clock)
-        limiter.check("u", 1, 60)
-        clock.now += 20
-        allowed, retry_after = limiter.check("u", 1, 60)
-        self.assertFalse(allowed)
-        self.assertEqual(retry_after, 40)
-
-    def test_purge_removes_idle_keys(self):
-        clock = FakeClock()
-        limiter = SlidingWindowLimiter(clock)
-        limiter.check("old", 5, 10)
-        clock.now += 100
-        limiter._calls = 499  # la siguiente llamada dispara la limpieza
-        limiter.check("new", 5, 10)
-        self.assertNotIn("old", limiter._hits)
-        self.assertIn("new", limiter._hits)
+def rate_limit_enabled() -> bool:
+    return os.getenv("RATE_LIMIT_DISABLED", "").strip().lower() not in {"1", "true", "yes", "si", "sí"}
 
 
-class _Client:
-    host = "192.0.2.50"
+class SlidingWindowLimiter:
+    """Cuenta eventos por clave dentro de una ventana de tiempo móvil."""
+
+    def __init__(self, clock: Callable[[], float] = time.monotonic):
+        self._clock = clock
+        self._hits: Dict[str, Deque[float]] = {}
+        self._windows: Dict[str, float] = {}
+        self._lock = threading.Lock()
+        self._calls = 0
+
+    def check(self, key: str, limit: int, window: float) -> Tuple[bool, int]:
+        """Devuelve (permitido, segundos_para_reintentar). Registra el intento si se permite."""
+        now = self._clock()
+        with self._lock:
+            self._calls += 1
+            if self._calls % 500 == 0:
+                self._purge(now)
+            hits = self._hits.get(key)
+            if hits is None:
+                hits = deque()
+                self._hits[key] = hits
+            self._windows[key] = window
+            cutoff = now - window
+            while hits and hits[0] <= cutoff:
+                hits.popleft()
+            if len(hits) >= limit:
+                retry_after = max(1, math.ceil(hits[0] + window - now))
+                return False, retry_after
+            hits.append(now)
+            return True, 0
+
+    def reset(self) -> None:
+        with self._lock:
+            self._hits.clear()
+            self._windows.clear()
+
+    def _purge(self, now: float) -> None:
+        for key in list(self._hits):
+            hits = self._hits[key]
+            window = self._windows.get(key, 0)
+            if not hits or hits[-1] <= now - window:
+                self._hits.pop(key, None)
+                self._windows.pop(key, None)
 
 
-def _request(forwarded=None, client=_Client):
-    class Request:
-        headers = {"x-forwarded-for": forwarded} if forwarded is not None else {}
-
-    Request.client = client
-    return Request()
+limiter = SlidingWindowLimiter()
 
 
-class EnforceTests(unittest.TestCase):
-    def setUp(self):
-        ratelimit.limiter.reset()
+def client_ip(request) -> str:
+    """IP del cliente para los límites de peticiones.
 
-    def test_disabled_flag_skips_limits(self):
-        with patch.dict(os.environ, {"RATE_LIMIT_DISABLED": "1"}):
-            for _ in range(50):
-                ratelimit.enforce("t", "k", 1, 60)
-
-
-class ClientIpTests(unittest.TestCase):
-    def test_default_uses_last_forwarded_entry(self):
-        # La IP de la derecha la añade el proxy de confianza (Render).
-        with patch.dict(os.environ, {"TRUSTED_PROXY_HOPS": "1"}):
-            req = _request("198.51.100.9, 203.0.113.7")
-            self.assertEqual(ratelimit.client_ip(req), "203.0.113.7")
-
-    def test_spoofed_left_entry_is_ignored(self):
-        # Un cliente que escribe su propia cabecera no puede elegir la IP que se cuenta.
-        with patch.dict(os.environ, {"TRUSTED_PROXY_HOPS": "1"}):
-            req = _request("1.2.3.4, 203.0.113.7")
-            self.assertEqual(ratelimit.client_ip(req), "203.0.113.7")
-
-    def test_two_hops_counts_from_the_right(self):
-        with patch.dict(os.environ, {"TRUSTED_PROXY_HOPS": "2"}):
-            req = _request("198.51.100.9, 203.0.113.7, 10.0.0.1")
-            self.assertEqual(ratelimit.client_ip(req), "203.0.113.7")
-
-    def test_zero_hops_ignores_header_and_uses_connection_ip(self):
-        with patch.dict(os.environ, {"TRUSTED_PROXY_HOPS": "0"}):
-            req = _request("203.0.113.7")
-            self.assertEqual(ratelimit.client_ip(req), "192.0.2.50")
-
-    def test_without_header_falls_back_to_connection_ip(self):
-        with patch.dict(os.environ, {"TRUSTED_PROXY_HOPS": "1"}):
-            self.assertEqual(ratelimit.client_ip(_request()), "192.0.2.50")
-
-    def test_without_header_or_client_returns_unknown(self):
-        with patch.dict(os.environ, {"TRUSTED_PROXY_HOPS": "1"}):
-            self.assertEqual(ratelimit.client_ip(_request(client=None)), "desconocido")
-
-    def test_invalid_hops_value_defaults_to_one(self):
-        with patch.dict(os.environ, {"TRUSTED_PROXY_HOPS": "abc"}):
-            req = _request("198.51.100.9, 203.0.113.7")
-            self.assertEqual(ratelimit.client_ip(req), "203.0.113.7")
+    X-Forwarded-For lo puede escribir el propio cliente: tomar su primer valor permitiría eludir los
+    límites con solo cambiar la cabecera. Cada proxy de confianza (Render, Vercel...) AÑADE la IP que ve
+    al final de la lista, así que se cuenta desde la derecha: TRUSTED_PROXY_HOPS=1 (por defecto) toma la
+    última entrada; 0 ignora la cabecera y usa la IP de la conexión (ejecución local sin proxy).
+    """
+    try:
+        hops = max(0, int(os.getenv("TRUSTED_PROXY_HOPS", "1")))
+    except ValueError:
+        hops = 1
+    if hops:
+        entries = [part.strip() for part in request.headers.get("x-forwarded-for", "").split(",") if part.strip()]
+        if len(entries) >= hops:
+            return entries[-hops][:64]
+    return request.client.host if getattr(request, "client", None) else "desconocido"
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
+def enforce(name: str, key: str, limit: int, window: float) -> None:
+    """Lanza HTTP 429 si la clave superó el límite. No hace nada si está desactivado."""
+    if not rate_limit_enabled():
+        return
+    allowed, retry_after = limiter.check(f"{name}:{key}", limit, window)
+    if not allowed:
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            429,
+            f"Demasiadas solicitudes. Intenta de nuevo en {retry_after} s.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+
+def limit_by_ip(name: str, limit: int, window: float):
+    """Dependencia de FastAPI: límite por IP (para rutas públicas como login)."""
+    from fastapi import Request
+
+    def dependency(request: Request) -> None:
+        enforce(name, client_ip(request), limit, window)
+
+    return dependency
+
+
+def limit_by_user(name: str, limit: int, window: float):
+    """Dependencia de FastAPI: límite por usuario autenticado (cae a la IP si no hay sesión)."""
+    from fastapi import Request
+
+    def dependency(request: Request) -> None:
+        identity = getattr(request.state, "user_email", None) or client_ip(request)
+        enforce(name, str(identity).lower(), limit, window)
+
+    return dependency
