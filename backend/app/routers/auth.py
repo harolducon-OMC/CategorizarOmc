@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from core.llm import PROVIDER_CONFIG
@@ -17,7 +18,7 @@ from .. import accounts, policies
 from ..auth_models import User, UserApiKey
 from ..db import get_db
 from ..ratelimit import enforce, limit_by_ip, limit_by_user
-from ..security import create_access_token, decrypt_api_key, email_is_allowed, encrypt_api_key, hash_password, verify_password
+from ..security import create_access_token, decrypt_api_key, email_is_allowed, encrypt_api_key, hash_password, verify_password, verify_password_constant_time
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -66,7 +67,11 @@ def register(payload: AuthPayload, db: Session = Depends(get_db)):
         role=accounts.new_user_role(db, email), password_changed_at=datetime.now(timezone.utc),
     )
     db.add(user)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:  # dos registros simultáneos con el mismo correo (o segundo super administrador)
+        db.rollback()
+        raise HTTPException(409, "Ya existe una cuenta con ese correo.")
     return _session(user, policy)
 
 
@@ -80,7 +85,9 @@ def login(payload: AuthPayload, db: Session = Depends(get_db)):
     if user is not None and user.locked_until is not None and user.locked_until > now:
         minutes = max(1, int((user.locked_until - now).total_seconds() // 60) + 1)
         raise HTTPException(423, f"Cuenta bloqueada temporalmente por intentos fallidos. Intenta de nuevo en {minutes} min.")
-    if not user or not verify_password(payload.password, user.password_hash):
+    # Se verifica SIEMPRE una contraseña (con un hash de relleno si el correo no existe): el tiempo de respuesta no delata qué cuentas existen
+    password_ok = verify_password_constant_time(payload.password, user.password_hash if user else None)
+    if user is None or not password_ok:
         if user is not None:
             user.failed_attempts = (user.failed_attempts or 0) + 1
             if user.failed_attempts >= policy["max_failed_logins"]:

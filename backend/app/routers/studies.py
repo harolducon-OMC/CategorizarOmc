@@ -5,6 +5,7 @@ Movido desde main.py sin cambios de comportamiento.
 import json
 import logging
 import re
+import uuid
 from datetime import datetime, timezone
 from io import BytesIO
 
@@ -19,7 +20,7 @@ from ..db import get_db
 from ..models import Classification, ClassificationDraft, Respondent, Study
 from ..ratelimit import limit_by_user
 from ..schemas import ClassificationDraftRequest
-from ..services import create_study, dataframe_for_study, excel_sheets, get_study
+from ..services import create_study, dataframe_for_study, excel_sheets, get_study, read_upload
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -27,7 +28,7 @@ router = APIRouter()
 
 @router.post("/api/uploads/sheets", dependencies=[Depends(limit_by_user("upload-sheets", 30, 600))])
 async def upload_sheets(file: UploadFile = File(...)):
-    raw = await file.read()
+    raw = await read_upload(file)
     return {"sheets": excel_sheets(raw, file.filename or "")}
 
 
@@ -48,7 +49,7 @@ async def upload_study(
     file: UploadFile = File(...), name: str = Form(""), sheet: str = Form(""),
     db: Session = Depends(get_db), owner_id: str = Depends(get_current_user_id),
 ):
-    raw = await file.read()
+    raw = await read_upload(file)
     study = create_study(
         db, raw, file.filename or "encuesta.csv", name or None, sheet or None, owner_id
     )
@@ -119,7 +120,7 @@ def save_classification_draft(
         ClassificationDraft.study_id == study_id, ClassificationDraft.question == request.question
     ))
     item = existing or ClassificationDraft(
-        id=__import__("uuid").uuid4().hex, study_id=study_id, question=request.question,
+        id=uuid.uuid4().hex, study_id=study_id, question=request.question,
         kind=request.kind, codeframe=[], known_brands=[], context="", multi=request.multi,
         provider=request.provider, model=request.model,
     )
