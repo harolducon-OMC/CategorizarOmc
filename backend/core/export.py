@@ -14,9 +14,10 @@ from openpyxl.cell import WriteOnlyCell
 from openpyxl.styles import Font, PatternFill
 
 from core.awareness import safe_sheet_name, write_main_sheet, write_sections_sheet
+from core.xlsafe import ILLEGAL_XML, force_text_if_formula
 from core.coding import NSNR_LABEL, frequency_table, onehot, valid_base
 
-_ILLEGAL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+_ILLEGAL = ILLEGAL_XML
 
 
 def short_name(text: str, size: int = 40) -> str:
@@ -117,10 +118,23 @@ def build_study_categorization_excel(df: pd.DataFrame, classifications: list[Dic
             return _ILLEGAL.sub("", value)[:32767]
         return value
 
+    def text_row(ws, values):
+        """Agrega una fila; cualquier texto que empiece por «=» queda como texto, nunca como fórmula."""
+        cells = []
+        for value in values:
+            if isinstance(value, str):
+                cell = WriteOnlyCell(ws, value=value)
+                force_text_if_formula(cell)
+                cells.append(cell)
+            else:
+                cells.append(value)
+        ws.append(cells)
+
     def append_header(ws, headers, widths=None):
         cells = []
         for value in headers:
             cell = WriteOnlyCell(ws, value=safe_value(str(value)))
+            force_text_if_formula(cell)
             cell.font = Font(bold=True, color="FFFFFF")
             cell.fill = PatternFill("solid", fgColor="17365D")
             cells.append(cell)
@@ -136,7 +150,7 @@ def build_study_categorization_excel(df: pd.DataFrame, classifications: list[Dic
     data_columns = [str(column) for column in df.columns]
     data_count = append_header(data_ws, data_columns, [22] * len(data_columns))
     for row in df.itertuples(index=False, name=None):
-        data_ws.append([safe_value(value) for value in row])
+        text_row(data_ws, [safe_value(value) for value in row])
     if data_count:
         data_ws.auto_filter.ref = f"A1:{get_column_letter(data_count)}{len(df) + 1}"
 
@@ -165,7 +179,7 @@ def build_study_categorization_excel(df: pd.DataFrame, classifications: list[Dic
                 values.extend([None, None])
             else:
                 values.extend([safe_value(response), safe_value(" | ".join(str(label) for label in (labels or [])))])
-        result_ws.append(values)
+        text_row(result_ws, values)
     if result_count:
         result_ws.auto_filter.ref = f"A1:{get_column_letter(result_count)}{len(df) + 1}"
 
@@ -207,7 +221,7 @@ def build_study_categorization_excel(df: pd.DataFrame, classifications: list[Dic
                     "Otros": "Respuesta válida que no encaja en las categorías definidas.",
                     "NS/NR": "Respuesta explícita sin información; una celda vacía permanece en blanco.",
                 }.get(name, "Marca del catálogo permitido." if kind == "brands" else "")
-            dictionary_ws.append([
+            text_row(dictionary_ws, [
                 safe_value(question), kind_label, safe_value(name), safe_value(description),
                 safe_value(str(keywords or "")), safe_value(" | ".join(str(value) for value in aliases)),
             ])
