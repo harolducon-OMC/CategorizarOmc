@@ -23,6 +23,13 @@ RESERVED_ENTITIES = {"ninguna", "ninguno", "ns nr", "nsnr", "ns", "nr", "otra", 
 FUZZY_THRESHOLD = 88   # similitud mínima (0-100) para agrupar una variante con una marca
 FUZZY_MIN_LEN = 5      # por debajo de 5 letras solo se acepta coincidencia exacta (evita Puma = Pura)
 
+# Palabras que no distinguen una marca ("Droguería Olímpica" y "Olímpica" son la misma). Ajusta la lista si hace falta.
+GENERIC_WORDS = {
+    "drogueria", "droguerias", "drogueras", "drogas", "droga", "farmacia", "farmacias",
+    "la", "el", "los", "las", "de", "del", "y", "e",
+}
+CONTAIN_MIN_LEN = 4  # una respuesta distintiva más corta que esto no se agrupa (evita ruido)
+
 
 def presets() -> Dict[str, Dict[str, Any]]:
     """Mismos presets que la app Streamlit (Bancos, Conglomerados, Personalizado)."""
@@ -172,23 +179,62 @@ def _observed(frame: pd.DataFrame, columns: List[str]) -> Tuple[Counter, Dict[st
     return counts, spellings
 
 
-def learn_variants(frame: pd.DataFrame, config: Dict[str, Any]) -> Tuple[Dict[str, List[str]], List[Dict[str, Any]]]:
-    """Agrega como alias las respuestas escritas parecido a una marca ("Decatlon" -> "Decathlon").
+def _distinctive(text: str) -> List[str]:
+    """Palabras de un nombre sin las genéricas: "Drogas la rebaja" -> ["rebaja"]."""
+    return [token for token in awareness.norm(text).split() if token not in GENERIC_WORDS]
 
-    Devuelve (alias completos, lista de variantes aprendidas para mostrar al usuario).
+
+def _contains_run(haystack: List[str], needle: List[str]) -> bool:
+    size = len(needle)
+    return size > 0 and any(haystack[i:i + size] == needle for i in range(len(haystack) - size + 1))
+
+
+def _match_by_distinctive_name(key: str, entity_forms: Dict[str, List[List[str]]]) -> Optional[str]:
+    """Marca cuyo nombre distintivo contiene lo que escribió la persona; None si no hay o es ambigua."""
+    tokens = _distinctive(key)
+    if not tokens or len("".join(tokens)) < CONTAIN_MIN_LEN:
+        return None
+    hits = [entity for entity, forms in entity_forms.items() if any(_contains_run(form, tokens) for form in forms)]
+    return hits[0] if len(hits) == 1 else None
+
+
+def learn_variants(frame: pd.DataFrame, config: Dict[str, Any]) -> Tuple[Dict[str, List[str]], List[Dict[str, Any]]]:
+    """Agrega como alias las respuestas que corresponden a una marca aunque estén incompletas o con typos.
+
+    Dos reglas: (1) nombre distintivo ("La rebaja" -> "Drogas la rebaja") y (2) similitud por typos
+    ("Decatlon" -> "Decathlon"). Devuelve (alias completos, variantes aprendidas para mostrar al usuario).
     """
     aliases = {entity: list(config["aliases"].get(entity) or [entity]) for entity in config["entities"]}
     if not config.get("fuzzy", True):
         return aliases, []
     counts, spellings = _observed(frame, _text_columns(frame, config))
     names = {entity: {awareness.norm(entity)} | {awareness.norm(a) for a in aliases[entity]} for entity in aliases}
+    entity_forms = {
+        entity: [form for form in ([_distinctive(entity)] + [_distinctive(a) for a in aliases[entity]]) if form]
+        for entity in aliases
+    }
     learned: List[Dict[str, Any]] = []
+
+    def learn(key: str, entity: str, count: int) -> None:
+        aliases[entity].append(key)
+        names[entity].add(key)
+        distinctive = _distinctive(key)
+        if distinctive and distinctive not in entity_forms[entity]:
+            entity_forms[entity].append(distinctive)
+        learned.append({"variante": spellings[key].most_common(1)[0][0], "marca": entity, "n": int(count)})
+
     for key, count in counts.most_common():
+        if any(awareness.contains_entity(key, entity, aliases) for entity in aliases):
+            continue  # ya la reconoce un alias exacto
+        if not _distinctive(key):
+            continue  # solo palabras genéricas ("Droguería"): no se puede asignar a una marca
+        matched = _match_by_distinctive_name(key, entity_forms)
+        if matched:
+            learn(key, matched, count)
+            continue
         compact = key.replace(" ", "")
         if len(compact) < FUZZY_MIN_LEN:
             continue
-        if any(awareness.contains_entity(key, entity, aliases) for entity in aliases):
-            continue  # ya la reconoce un alias exacto
         best, best_score = None, 0.0
         for entity, forms in names.items():
             for form in forms:
@@ -199,9 +245,7 @@ def learn_variants(frame: pd.DataFrame, config: Dict[str, Any]) -> Tuple[Dict[st
                 if score > best_score:
                     best, best_score = entity, score
         if best is not None and best_score >= FUZZY_THRESHOLD:
-            aliases[best].append(key)
-            names[best].add(key)
-            learned.append({"variante": spellings[key].most_common(1)[0][0], "marca": best, "n": int(count)})
+            learn(key, best, count)
     return aliases, learned
 
 
