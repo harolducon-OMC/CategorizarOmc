@@ -11,11 +11,21 @@ JWT_SECRET = os.getenv("JWT_SECRET", "")
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_MINUTES = int(os.getenv("ACCESS_TOKEN_MINUTES", "60"))
 PASSWORD_HASHER = PasswordHash.recommended()
+_PLACEHOLDER_MARKERS = ("REEMPLAZA", "CHANGE-ME", "CHANGE-THIS", "CAMBIA-ESTE")
+
+
+def _is_weak_secret(value: str) -> bool:
+    upper = value.upper()
+    return len(value) < 32 or any(marker in upper for marker in _PLACEHOLDER_MARKERS)
 
 
 def validate_security_config():
-    if len(JWT_SECRET) < 32 or "REEMPLAZA" in JWT_SECRET.upper() or "CHANGE-ME" in JWT_SECRET.upper():
+    if _is_weak_secret(JWT_SECRET):
         raise RuntimeError("Configura JWT_SECRET con al menos 32 caracteres aleatorios antes de iniciar.")
+    # Clave de cifrado de API keys independiente (opcional). Si se define, también debe ser robusta.
+    dedicated = os.getenv("API_KEY_ENCRYPTION_SECRET", "")
+    if dedicated and _is_weak_secret(dedicated):
+        raise RuntimeError("API_KEY_ENCRYPTION_SECRET debe tener al menos 32 caracteres aleatorios.")
 
 
 def hash_password(password: str) -> str:
@@ -23,6 +33,18 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(password: str, password_hash: str) -> bool:
+    return PASSWORD_HASHER.verify(password, password_hash)
+
+
+# Hash de relleno: se verifica cuando el correo no existe para que el tiempo de respuesta no delate qué cuentas existen.
+_DUMMY_HASH = PASSWORD_HASHER.hash("contraseña-de-relleno-no-valida")
+
+
+def verify_password_constant_time(password: str, password_hash: str | None) -> bool:
+    """Verifica la contraseña y, si no hay hash (usuario inexistente), gasta el mismo tiempo de cálculo."""
+    if password_hash is None:
+        PASSWORD_HASHER.verify(password, _DUMMY_HASH)
+        return False
     return PASSWORD_HASHER.verify(password, password_hash)
 
 
@@ -34,11 +56,22 @@ def create_access_token(subject: str, token_version: int = 0, minutes: int | Non
 
 
 def token_claims(token: str) -> dict | None:
-    try:
-        claims = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-    except JWTError:
+    if not token or len(token) > 4096:
         return None
-    return claims if isinstance(claims.get("sub"), str) else None
+    try:
+        claims = jwt.decode(
+            token, JWT_SECRET, algorithms=[JWT_ALGORITHM],
+            options={"require_exp": True, "require_iat": True, "require_sub": True},
+        )
+    except (JWTError, ValueError):
+        return None
+    if not isinstance(claims.get("sub"), str):
+        return None
+    try:
+        claims["tv"] = int(claims.get("tv", 0))
+    except (TypeError, ValueError):
+        return None
+    return claims
 
 
 def token_subject(token: str) -> str | None:
@@ -52,13 +85,16 @@ def allowed_email_domain() -> str:
 
 def email_is_allowed(email: str) -> bool:
     domain = allowed_email_domain()
-    return bool(domain and email.strip().lower().endswith("@" + domain))
+    local, _, host = email.strip().lower().rpartition("@")
+    return bool(domain and local and host == domain)
 
 
 def _api_key_cipher() -> Fernet:
     """Deriva una clave Fernet separada lógicamente del secreto JWT."""
     validate_security_config()
-    digest = hashlib.sha256((JWT_SECRET + ":user-provider-api-keys:v1").encode("utf-8")).digest()
+    # API_KEY_ENCRYPTION_SECRET permite rotar JWT_SECRET sin perder las API keys guardadas.
+    base_secret = os.getenv("API_KEY_ENCRYPTION_SECRET") or JWT_SECRET
+    digest = hashlib.sha256((base_secret + ":user-provider-api-keys:v1").encode("utf-8")).digest()
     return Fernet(base64.urlsafe_b64encode(digest))
 
 

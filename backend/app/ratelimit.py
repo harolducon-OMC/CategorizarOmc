@@ -68,11 +68,21 @@ limiter = SlidingWindowLimiter()
 
 
 def client_ip(request) -> str:
-    """IP del cliente. Detrás de Vercel/Render se toma la primera de X-Forwarded-For."""
-    forwarded = request.headers.get("x-forwarded-for", "")
-    first = forwarded.split(",")[0].strip() if forwarded else ""
-    if first:
-        return first
+    """IP del cliente para los límites de peticiones.
+
+    X-Forwarded-For lo puede escribir el propio cliente: tomar su primer valor permitiría eludir los
+    límites con solo cambiar la cabecera. Cada proxy de confianza (Render, Vercel...) AÑADE la IP que ve
+    al final de la lista, así que se cuenta desde la derecha: TRUSTED_PROXY_HOPS=1 (por defecto) toma la
+    última entrada; 0 ignora la cabecera y usa la IP de la conexión (ejecución local sin proxy).
+    """
+    try:
+        hops = max(0, int(os.getenv("TRUSTED_PROXY_HOPS", "1")))
+    except ValueError:
+        hops = 1
+    if hops:
+        entries = [part.strip() for part in request.headers.get("x-forwarded-for", "").split(",") if part.strip()]
+        if len(entries) >= hops:
+            return entries[-hops][:64]
     return request.client.host if getattr(request, "client", None) else "desconocido"
 
 

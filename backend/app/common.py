@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from core import coding
+from core.llm import LLMError
 from .auth_models import User, UserApiKey
 from .db import get_db
 from .models import Classification, ClassificationDraft, Study
@@ -80,3 +81,25 @@ def _api_key_for_user(db: Session, email: str, provider: str, supplied: Optional
         return decrypt_api_key(saved.encrypted_key)
     except RuntimeError as exc:
         raise HTTPException(400, "La clave guardada ya no se puede leer (cambió JWT_SECRET en el servidor). Vuelve a guardarla en Ajustes.") from exc
+
+
+def release_connection(db: Session) -> None:
+    """Devuelve la conexión al pool antes de una llamada larga a un proveedor de IA (minutos).
+
+    Sin esto, cada clasificación en curso retiene una conexión de PostgreSQL y unas pocas
+    peticiones simultáneas agotan el pool (5 + 5 por defecto), dejando sin servicio al resto.
+    La sesión vuelve a abrir una transacción sola en la siguiente consulta.
+    """
+    db.rollback()
+
+
+def public_error(exc: Exception, fallback: str) -> str:
+    """Texto de error seguro para el cliente.
+
+    Los mensajes de LLMError y ValueError los redactamos nosotros (sin claves ni rutas). Cualquier otra
+    excepción (pandas, SQL, KeyError...) puede traer detalles internos: se registra en el log y al cliente
+    solo le llega el mensaje genérico.
+    """
+    if isinstance(exc, (LLMError, ValueError)):
+        return str(exc)[:500]
+    return fallback
