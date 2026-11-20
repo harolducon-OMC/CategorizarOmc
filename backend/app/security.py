@@ -72,14 +72,6 @@ def token_claims(token: str) -> dict | None:
     except (TypeError, ValueError):
         return None
     return claims
-<<<<<<< HEAD
-=======
-
-
-def token_subject(token: str) -> str | None:
-    claims = token_claims(token)
-    return claims["sub"] if claims else None
->>>>>>> cb3a1cb179251adae7eb3d93ad086a25a7e02b09
 
 
 def allowed_email_domain() -> str:

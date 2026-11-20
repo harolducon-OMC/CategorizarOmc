@@ -33,10 +33,7 @@ SLOW_REQUEST_SECONDS = float(os.getenv("SLOW_REQUEST_SECONDS", "5"))
 PASSWORD_CHANGE_PATHS = {"/api/auth/change-password", "/api/auth/me"}
 _REQUEST_ID_OK = re.compile(r"[A-Za-z0-9._-]{1,64}")
 DOCS_PREFIXES = ("/docs", "/openapi.json", "/redoc")
-<<<<<<< HEAD
 MAX_JSON_BYTES = 2 * 1024 * 1024  # los JSON de la API son pequeños; los archivos (multipart) tienen su propio límite de 25 MB
-=======
->>>>>>> cb3a1cb179251adae7eb3d93ad086a25a7e02b09
 
 
 @asynccontextmanager
@@ -63,13 +60,10 @@ async def security_middleware(request: Request, call_next):
     started = time.monotonic()
     path = request.url.path
     public = path in {"/api/health", "/api/auth/register", "/api/auth/login", "/api/telemetry/vitals"} or path.startswith(DOCS_PREFIXES)
-<<<<<<< HEAD
     if request.method in {"POST", "PUT", "PATCH"} and request.headers.get("content-type", "").startswith("application/json"):
         declared = request.headers.get("content-length", "")
         if declared.isdigit() and int(declared) > MAX_JSON_BYTES:
             return JSONResponse({"detail": "El cuerpo de la petición es demasiado grande."}, status_code=413, headers={"X-Request-ID": request_id})
-=======
->>>>>>> cb3a1cb179251adae7eb3d93ad086a25a7e02b09
     if path.startswith("/api/") and request.method != "OPTIONS" and not public:
         auth_header = request.headers.get("Authorization", "")
         scheme, _, token = auth_header.partition(" ")
