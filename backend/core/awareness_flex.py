@@ -81,13 +81,18 @@ def presets() -> Dict[str, Dict[str, Any]]:
     }
 
 
+def _clean_label(value) -> str:
+    """Quita los «=» iniciales: un nombre que empiece así se guardaría como fórmula en el Excel (inyección de fórmulas)."""
+    return str(value).strip().lstrip("=").strip()
+
+
 def parse_config(raw) -> Dict[str, Any]:
     """Convierte y valida la configuración enviada por la interfaz."""
     data = json.loads(raw) if isinstance(raw, (str, bytes)) else dict(raw or {})
     raw_entities = data.get("entities", [])
     if not isinstance(raw_entities, list):
         raise ValueError("Las marcas deben ser una lista.")
-    requested = [str(item).strip() for item in raw_entities if str(item).strip()]
+    requested = [name for name in (_clean_label(item) for item in raw_entities) if name]
     if len(requested) > MAX_ENTITIES or any(len(name) > MAX_NAME_CHARS for name in requested):
         raise ValueError(f"Máximo {MAX_ENTITIES} marcas, de hasta {MAX_NAME_CHARS} caracteres cada una.")
     # "Ninguna", NS/NR u "Otra" no son marcas: nunca suman recordación, así que no se grafican.
@@ -122,7 +127,7 @@ def parse_config(raw) -> Dict[str, Any]:
     for index, item in enumerate((data.get("analyses") or [])[:2], start=1):
         analyses.append({
             "tom_first_only": tom_first_only,
-            "name": str(item.get("name") or f"Análisis {index}").strip() or f"Análisis {index}",
+            "name": _clean_label(item.get("name") or f"Análisis {index}") or f"Análisis {index}",
             "tom": str(item.get("tom") or "0"),
             "esp": str(item.get("esp") or "0"),
             "ayu": str(item.get("ayu") or "0"),

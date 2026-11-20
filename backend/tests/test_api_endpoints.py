@@ -106,7 +106,7 @@ class ApiHttpLayerTests(unittest.TestCase):
 
     # ---- propiedad de los datos
     def test_study_of_another_user_returns_404(self):
-        self.db.scalar.side_effect = [SimpleNamespace(id="user-1"), None]  # usuario válido, estudio ajeno
+        self.db.scalar.return_value = None  # el middleware ya aportó el id del usuario: la única consulta es el estudio, que no es suyo
         response = self.client.get("/api/studies/estudio-ajeno", headers=self.headers)
         self.assertEqual(response.status_code, 404)
 

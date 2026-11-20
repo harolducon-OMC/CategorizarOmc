@@ -26,6 +26,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from .xlsafe import set_cell_value as _safe_set
+from .xlsx_safety import neutralize_formulas
 
 # ============================================================
 # CONFIGURACIONES PREDEFINIDAS
@@ -634,6 +635,7 @@ def build_excel_bytes(df, demo_cols, cfg1, cfg2, entities, aliases, normalizatio
                 freq_table = tom_frequency_table(df, tom_col_name, normalizations)
                 write_sections_sheet(wb, f"Frecuencias P1 {cfg['name']}", [("Distribución de Respuestas P1 (TOM)", freq_table)])
 
+    neutralize_formulas(wb)  # la plataforma nunca escribe fórmulas a propósito: todo lo que lo parezca se guarda como texto
     output = io.BytesIO()
     wb.save(output)
     return output.getvalue()
