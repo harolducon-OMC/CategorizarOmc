@@ -18,7 +18,11 @@ from .. import accounts, policies
 from ..auth_models import User, UserApiKey
 from ..db import get_db
 from ..ratelimit import enforce, limit_by_ip, limit_by_user
+<<<<<<< HEAD
 from ..security import create_access_token, decrypt_api_key, encrypt_api_key, hash_password, verify_password, verify_password_constant_time
+=======
+from ..security import create_access_token, decrypt_api_key, email_is_allowed, encrypt_api_key, hash_password, verify_password, verify_password_constant_time
+>>>>>>> cb3a1cb179251adae7eb3d93ad086a25a7e02b09
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
