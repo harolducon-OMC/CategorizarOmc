@@ -7,7 +7,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-this-local}
       POSTGRES_DB: ${POSTGRES_DB:-insights}
     ports:
-      - "${POSTGRES_PORT:-5433}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"   # solo desde esta máquina: la contraseña local es de desarrollo
     volumes:
       - insights_pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -28,8 +28,18 @@ services:
       JWT_SECRET: ${JWT_SECRET:?Configura JWT_SECRET en .env}
       OMC_EMAIL_DOMAIN: ${OMC_EMAIL_DOMAIN:-omc}
       ACCESS_TOKEN_MINUTES: ${ACCESS_TOKEN_MINUTES:-60}
+      # Estas variables están documentadas en .env.example; sin ellas aquí el contenedor las ignoraba (el .env no se copia a la imagen)
+      SUPERADMIN_EMAIL: ${SUPERADMIN_EMAIL:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+      AI_REDACT_PII: ${AI_REDACT_PII:-1}
+      API_KEY_ENCRYPTION_SECRET: ${API_KEY_ENCRYPTION_SECRET:-}
+      DISABLE_API_DOCS: ${DISABLE_API_DOCS:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # Sin proxy delante, X-Forwarded-For lo escribe el cliente: con 0 se ignora y no se pueden esquivar los límites
+      TRUSTED_PROXY_HOPS: ${TRUSTED_PROXY_HOPS:-0}
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./backend:/app
     depends_on:
@@ -45,7 +55,7 @@ services:
     build: ./awareness
     restart: unless-stopped
     ports:
-      - "8501:8501"
+      - "127.0.0.1:8501:8501"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health', timeout=3)"]
       interval: 10s

@@ -4,6 +4,7 @@ Movido desde main.py sin cambios de comportamiento.
 """
 import logging
 import re
+import uuid
 from datetime import datetime, timezone
 from io import BytesIO
 from typing import Optional
@@ -17,7 +18,7 @@ from sqlalchemy.orm import Session, defer
 from core import brands, coding, export, insights, quality
 from ..cache import result_cache
 from ..common import (_api_key_for_user, _class_or_404, _classification_json,
-                      _labels_without_blank_responses, get_current_user_id)
+                      _labels_without_blank_responses, get_current_user_id, public_error, release_connection)
 from ..db import get_db
 from ..models import Classification, ClassificationBaseline, ClassificationDraft, ClassificationReview, Respondent
 from ..ratelimit import limit_by_user
@@ -40,6 +41,7 @@ def propose_categories(
     api_key = _api_key_for_user(db, http_request.state.user_email, request.provider, api_key)
     llm = create_llm(request.provider, request.model, api_key)
     frame = dataframe_for_study(db, study)
+    release_connection(db)
     try:
         categories = coding.discover_categories(
             llm, request.question, frame[request.question].fillna("").astype(str).tolist(),
@@ -47,7 +49,7 @@ def propose_categories(
         )
     except Exception as exc:
         logger.exception("Fallo en propose_categories")
-        raise HTTPException(502, f"No se pudieron proponer categorías: {exc}") from exc
+        raise HTTPException(502, "No se pudieron proponer categorías: " + public_error(exc, "error inesperado del proveedor de IA.")) from exc
     return {"codeframe": categories}
 
 
@@ -64,6 +66,7 @@ def classify_question(
     llm = create_llm(request.provider, request.model, api_key)
     frame = dataframe_for_study(db, study)
     texts = frame[request.question].fillna("").astype(str).tolist()
+    release_connection(db)
     try:
         if request.kind in ("themes", "sentiment"):
             codeframe = (
@@ -105,14 +108,14 @@ def classify_question(
         raise
     except Exception as exc:
         logger.exception("Fallo en classify_question")
-        raise HTTPException(502, f"Falló la clasificación: {exc}") from exc
+        raise HTTPException(502, "Falló la clasificación: " + public_error(exc, "error inesperado del proveedor de IA.")) from exc
 
     item = db.scalar(select(Classification).where(
         Classification.study_id == study_id, Classification.question == request.question
     ))
     if item is None:
         item = Classification(
-            id=__import__("uuid").uuid4().hex, study_id=study_id,
+            id=uuid.uuid4().hex, study_id=study_id,
             question=request.question, kind=request.kind, labels=labels, categories=categories,
         )
         db.add(item)
@@ -167,7 +170,7 @@ def classification_rows(
     stored = item.labels or []
     for row in rows:
         response = row.data.get(item.question)
-        labels = [] if coding.is_blank_response(response) else (stored[row.row_index] if row.row_index < len(stored) else [])
+        labels = [] if coding.is_blank_response(response) else list((stored[row.row_index] if row.row_index < len(stored) else None) or [])
         result_rows.append({"row_index": row.row_index, "response": response, "labels": labels})
     return {"rows": result_rows, "total": study.row_count, "categories": item.categories}
 
@@ -179,11 +182,7 @@ def edit_labels(
 ):
     item = _class_or_404(db, classification_id, owner_id)
     study = get_study(db, item.study_id, owner_id)
-    allowed = set(item.categories)
-    if item.kind == "brands":
-        allowed.update([brands.NINGUNA_LABEL, brands.OTHER_BRAND_LABEL, coding.NSNR_LABEL])
-    if item.kind in ("themes", "sentiment"):
-        allowed.update([coding.OTHER, coding.NSNR_LABEL])
+    allowed = _allowed_labels(item)
     requested_indexes = [change.row_index for change in request.changes]
     source_rows = db.scalars(select(Respondent).where(
         Respondent.study_id == study.id, Respondent.row_index.in_(requested_indexes)
@@ -192,7 +191,7 @@ def edit_labels(
     labels_by_row = [list(row or []) for row in (item.labels or [])]
     skipped_blank = 0
     for change in request.changes:
-        if change.row_index < 0 or change.row_index >= len(labels_by_row):
+        if change.row_index >= len(labels_by_row):
             raise HTTPException(400, f"La fila {change.row_index} no existe.")
         if change.row_index in blank_indexes:
             labels_by_row[change.row_index] = []
@@ -318,15 +317,33 @@ def save_quality_reviews(
     allowed = _allowed_labels(item)
     labels_by_row = [list(row or []) for row in (item.labels or [])]
     baseline = db.get(ClassificationBaseline, item.id)
+    # Si una fila llega repetida gana la última: dos revisiones nuevas de la misma fila violarían la restricción única
+    changes = list({change.row_index: change for change in request.reviews}.values())
+    requested_indexes = [change.row_index for change in changes]
     saved_rows = {
         review.row_index: review for review in db.scalars(select(ClassificationReview).where(
             ClassificationReview.classification_id == item.id,
-            ClassificationReview.row_index.in_([change.row_index for change in request.reviews]),
+            ClassificationReview.row_index.in_(requested_indexes),
         )).all()
     }
-    for change in request.reviews:
+    # Una respuesta vacía nunca lleva etiqueta (igual que en edit_labels)
+    blank_indexes = {
+        row_index for row_index, text in db.execute(
+            select(Respondent.row_index, Respondent.data[item.question].as_string())
+            .where(Respondent.study_id == item.study_id, Respondent.row_index.in_(requested_indexes))
+        ).all() if coding.is_blank_response(text)
+    }
+    saved = skipped = 0
+    for change in changes:
         if change.row_index >= len(labels_by_row):
             raise HTTPException(400, f"La fila {change.row_index} no existe.")
+        if change.row_index in blank_indexes:
+            labels_by_row[change.row_index] = []
+            skipped += 1
+            continue
+        if not change.labels:  # fila sin selección: no cuenta como revisada y conserva su etiqueta actual
+            skipped += 1
+            continue
         invalid = set(change.labels) - allowed
         if invalid:
             raise HTTPException(400, f"Categorías no válidas: {', '.join(sorted(invalid))}")
@@ -338,18 +355,19 @@ def save_quality_reviews(
         review = saved_rows.get(change.row_index)
         if review is None:
             db.add(ClassificationReview(
-                id=__import__("uuid").uuid4().hex, classification_id=item.id, row_index=change.row_index,
+                id=uuid.uuid4().hex, classification_id=item.id, row_index=change.row_index,
                 ai_labels=ai, human_labels=human,
             ))
         else:
             review.human_labels = human
             review.reviewed_at = datetime.now(timezone.utc)
         labels_by_row[change.row_index] = human
+        saved += 1
     item.labels = labels_by_row
     item.insights = None
     item.updated_at = datetime.now(timezone.utc)
     db.commit()
-    return {"saved": len(request.reviews), **_quality_payload(db, item)}
+    return {"saved": saved, "skipped": skipped, **_quality_payload(db, item)}
 
 
 @router.get("/api/classifications/{classification_id}/frequencies")
@@ -404,14 +422,16 @@ def generate_insights(
     llm = create_llm(provider, model, api_key)
     frame = dataframe_for_study(db, study)
     labels = _labels_without_blank_responses(item.labels, frame[item.question].tolist())
+    question, categories, context = item.question, list(item.categories or []), (item.config or {}).get("context", "")
+    release_connection(db)
     try:
         result = insights.build_insights(
-            llm, item.question, frame[item.question].fillna("").astype(str).tolist(), labels,
-            item.categories, context=item.config.get("context", ""),
+            llm, question, frame[question].fillna("").astype(str).tolist(), labels,
+            categories, context=context,
         )
     except Exception as exc:
         logger.exception("Fallo en generate_insights")
-        raise HTTPException(502, f"No se pudieron generar insights: {exc}") from exc
+        raise HTTPException(502, "No se pudieron generar insights: " + public_error(exc, "error inesperado del proveedor de IA.")) from exc
     item.insights = result
     item.updated_at = datetime.now(timezone.utc)
     db.commit()

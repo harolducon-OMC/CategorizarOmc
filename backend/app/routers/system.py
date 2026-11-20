@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from core import help_assistant, help_kb
 from core.llm import PROVIDER_CONFIG
-from ..common import _api_key_for_user
+from ..common import _api_key_for_user, public_error
 from ..db import get_db
 from ..ratelimit import limit_by_ip, limit_by_user
 from ..schemas import HelpChatRequest
@@ -58,7 +58,7 @@ def platform_help_chat(
         )
     except Exception as exc:
         logger.exception("Fallo en platform_help_chat")
-        raise HTTPException(502, f"No se pudo responder la pregunta: {exc}") from exc
+        raise HTTPException(502, "No se pudo responder la pregunta: " + public_error(exc, "error inesperado del proveedor de IA.")) from exc
     return {"answer": response}
 
 
@@ -93,7 +93,7 @@ def platform_help_chat_stream(
             yield _sse({"error": str(exc.detail)})
         except Exception as exc:
             logger.exception("Fallo en platform_help_chat_stream")
-            yield _sse({"error": f"No se pudo responder la pregunta: {exc}"})
+            yield _sse({"error": "No se pudo responder la pregunta: " + public_error(exc, "error inesperado del proveedor de IA.")})
 
     return StreamingResponse(events(), media_type="text/event-stream", headers={
         "Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no", "Content-Encoding": "identity",
@@ -104,8 +104,9 @@ class VitalPayload(BaseModel):
     name: Literal["LCP", "CLS", "INP", "FCP", "TTFB"]
     value: float = Field(ge=0, le=600000)
     rating: Optional[Literal["good", "needs-improvement", "poor"]] = None
-    page: str = Field(default="", max_length=40)
-    connection: str = Field(default="", max_length=12)
+    # Solo caracteres seguros: estos textos van al log y un cliente malicioso podría falsificar líneas con saltos de línea.
+    page: str = Field(default="", max_length=40, pattern=r"^[\w./#?=&:-]*$")
+    connection: str = Field(default="", max_length=12, pattern=r"^[\w.-]*$")
 
 
 @router.post("/api/telemetry/vitals", status_code=204, dependencies=[Depends(limit_by_ip("vitals", 120, 60))])

@@ -59,6 +59,18 @@ class SlidingWindowLimiterTests(unittest.TestCase):
         self.assertIn("new", limiter._hits)
 
 
+class _Client:
+    host = "192.0.2.50"
+
+
+def _request(forwarded=None, client=_Client):
+    class Request:
+        headers = {"x-forwarded-for": forwarded} if forwarded is not None else {}
+
+    Request.client = client
+    return Request()
+
+
 class EnforceTests(unittest.TestCase):
     def setUp(self):
         ratelimit.limiter.reset()
@@ -68,12 +80,42 @@ class EnforceTests(unittest.TestCase):
             for _ in range(50):
                 ratelimit.enforce("t", "k", 1, 60)
 
-    def test_client_ip_prefers_forwarded_header(self):
-        class Request:
-            headers = {"x-forwarded-for": "203.0.113.7, 10.0.0.1"}
-            client = None
 
-        self.assertEqual(ratelimit.client_ip(Request()), "203.0.113.7")
+class ClientIpTests(unittest.TestCase):
+    def test_default_uses_last_forwarded_entry(self):
+        # La IP de la derecha la añade el proxy de confianza (Render).
+        with patch.dict(os.environ, {"TRUSTED_PROXY_HOPS": "1"}):
+            req = _request("198.51.100.9, 203.0.113.7")
+            self.assertEqual(ratelimit.client_ip(req), "203.0.113.7")
+
+    def test_spoofed_left_entry_is_ignored(self):
+        # Un cliente que escribe su propia cabecera no puede elegir la IP que se cuenta.
+        with patch.dict(os.environ, {"TRUSTED_PROXY_HOPS": "1"}):
+            req = _request("1.2.3.4, 203.0.113.7")
+            self.assertEqual(ratelimit.client_ip(req), "203.0.113.7")
+
+    def test_two_hops_counts_from_the_right(self):
+        with patch.dict(os.environ, {"TRUSTED_PROXY_HOPS": "2"}):
+            req = _request("198.51.100.9, 203.0.113.7, 10.0.0.1")
+            self.assertEqual(ratelimit.client_ip(req), "203.0.113.7")
+
+    def test_zero_hops_ignores_header_and_uses_connection_ip(self):
+        with patch.dict(os.environ, {"TRUSTED_PROXY_HOPS": "0"}):
+            req = _request("203.0.113.7")
+            self.assertEqual(ratelimit.client_ip(req), "192.0.2.50")
+
+    def test_without_header_falls_back_to_connection_ip(self):
+        with patch.dict(os.environ, {"TRUSTED_PROXY_HOPS": "1"}):
+            self.assertEqual(ratelimit.client_ip(_request()), "192.0.2.50")
+
+    def test_without_header_or_client_returns_unknown(self):
+        with patch.dict(os.environ, {"TRUSTED_PROXY_HOPS": "1"}):
+            self.assertEqual(ratelimit.client_ip(_request(client=None)), "desconocido")
+
+    def test_invalid_hops_value_defaults_to_one(self):
+        with patch.dict(os.environ, {"TRUSTED_PROXY_HOPS": "abc"}):
+            req = _request("198.51.100.9, 203.0.113.7")
+            self.assertEqual(ratelimit.client_ip(req), "203.0.113.7")
 
 
 if __name__ == "__main__":

@@ -1,5 +1,8 @@
 import io
 import json
+import re
+import uuid
+import zipfile
 import pandas as pd
 from .policies import provider_allowed
 from .cache import MAX_CACHED_CELLS, MISSING, frame_cache
@@ -8,11 +11,37 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from .auth_models import User
 from .models import Respondent, Study
-from core.llm import LLM, PROVIDER_CONFIG
+from core.llm import LLM, LLMError, PROVIDER_CONFIG
 
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 MAX_ROWS = 200_000
 MAX_COLUMNS = 500
+_MODEL_ID = re.compile(r"[A-Za-z0-9._:/@+-]{1,120}")
+MAX_XLSX_UNCOMPRESSED_BYTES = 250 * 1024 * 1024  # un .xlsx es un ZIP: evita «bombas de descompresión»
+_READ_CHUNK = 1024 * 1024
+
+
+async def read_upload(file: UploadFile) -> bytes:
+    """Lee el archivo subido por partes y corta al superar el límite (sin cargar todo en memoria antes de validar)."""
+    chunks, total = [], 0
+    while True:
+        chunk = await file.read(_READ_CHUNK)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > MAX_UPLOAD_BYTES:
+            raise HTTPException(413, "El archivo supera el límite de 25 MB.")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _check_xlsx_is_safe(raw: bytes) -> None:
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            if sum(info.file_size for info in archive.infolist()) > MAX_XLSX_UNCOMPRESSED_BYTES:
+                raise HTTPException(413, "El Excel descomprimido es demasiado grande.")
+    except zipfile.BadZipFile as exc:
+        raise HTTPException(400, "El archivo no es un .xlsx válido.") from exc
 
 
 def _read_dataframe(raw: bytes, filename: str, sheet: str | None = None) -> pd.DataFrame:
@@ -24,20 +53,21 @@ def _read_dataframe(raw: bytes, filename: str, sheet: str | None = None) -> pd.D
             frame = None
             for encoding in ("utf-8-sig", "latin-1"):
                 try:
-                    frame = pd.read_csv(io.BytesIO(raw), sep=None, engine="python", encoding=encoding)
+                    frame = pd.read_csv(io.BytesIO(raw), sep=None, engine="python", encoding=encoding, nrows=MAX_ROWS + 1)
                     break
                 except UnicodeDecodeError:
                     continue
             if frame is None:
                 raise ValueError("No se reconoce la codificación del CSV.")
         elif suffix.endswith(".xlsx"):
+            _check_xlsx_is_safe(raw)
             frame = pd.read_excel(io.BytesIO(raw), sheet_name=sheet or 0, engine="openpyxl")
         else:
             raise HTTPException(415, "Formato no compatible. Usa CSV o XLSX.")
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(400, f"No se pudo leer el archivo: {exc}") from exc
+        raise HTTPException(400, f"No se pudo leer el archivo: {str(exc)[:200]}") from exc
     if frame.empty:
         raise HTTPException(400, "El archivo no contiene registros.")
     if len(frame) > MAX_ROWS or len(frame.columns) > MAX_COLUMNS:
@@ -61,10 +91,11 @@ def excel_sheets(raw: bytes, filename: str) -> list[str]:
         raise HTTPException(413, "El archivo supera el límite de 25 MB.")
     if not filename.lower().endswith(".xlsx"):
         return []
+    _check_xlsx_is_safe(raw)
     try:
         return pd.ExcelFile(io.BytesIO(raw), engine="openpyxl").sheet_names
     except Exception as exc:
-        raise HTTPException(400, f"No se pudieron leer las hojas del Excel: {exc}") from exc
+        raise HTTPException(400, f"No se pudieron leer las hojas del Excel: {str(exc)[:200]}") from exc
 
 
 def create_study(
@@ -72,7 +103,7 @@ def create_study(
 ) -> Study:
     frame = _read_dataframe(raw, filename, sheet)
     study = Study(
-        id=__import__("uuid").uuid4().hex,
+        id=uuid.uuid4().hex,
         owner_id=owner_id,
         name=(name or filename.rsplit(".", 1)[0]).strip()[:240] or filename,
         source_filename=filename[:255],
@@ -129,11 +160,15 @@ def get_user_id(db: Session, email: str) -> str:
 def create_llm(provider: str, model: str, api_key: str | None) -> LLM:
     if provider not in PROVIDER_CONFIG:
         raise HTTPException(400, "Proveedor de IA no reconocido.")
+    if not _MODEL_ID.fullmatch(model or ""):
+        raise HTTPException(422, "El ID del modelo no es válido.")
     if not provider_allowed(provider):
         raise HTTPException(403, "La política de seguridad de tu organización no permite este proveedor de IA. Elige otro en Ajustes.")
     if not api_key:
         raise HTTPException(400, "Escribe una API key en Ajustes para llamar al modelo.")
     try:
         return LLM(api_key, fast=model, smart=model, provider=provider)
-    except Exception as exc:
+    except LLMError as exc:
         raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(400, "No se pudo inicializar el proveedor de IA.") from exc

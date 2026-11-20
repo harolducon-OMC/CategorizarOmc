@@ -8,7 +8,7 @@ Reglas (ver app/accounts.py::permission_error):
 """
 import logging
 from datetime import datetime, timezone
-from typing import Literal, Optional
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field

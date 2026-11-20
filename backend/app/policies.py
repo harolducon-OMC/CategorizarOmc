@@ -106,7 +106,8 @@ def email_domain_ok(email: str, policy: Dict) -> bool:
     if not domains:
         from .security import email_is_allowed  # dominio configurado en el servidor
         return email_is_allowed(email)
-    return any(email.strip().lower().endswith("@" + domain) for domain in domains)
+    local, _, host = email.strip().lower().rpartition("@")
+    return bool(local) and host in domains
 
 
 def provider_allowed(provider: str, policy: Optional[Dict] = None) -> bool:

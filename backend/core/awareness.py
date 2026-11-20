@@ -10,14 +10,22 @@ Extraído del repo https://github.com/HaroldDuconAbril/awareness
 """
 
 import io
+import functools
 import re
 import unicodedata
 from typing import Dict, List, Optional
+
+try:  # Python 3.11+
+    from re import _constants as _sre_constants, _parser as _sre_parse
+except ImportError:  # pragma: no cover
+    import sre_constants as _sre_constants, sre_parse as _sre_parse
 
 import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
+
+from .xlsafe import set_cell_value as _safe_set
 
 # ============================================================
 # CONFIGURACIONES PREDEFINIDAS
@@ -93,12 +101,19 @@ NEGATIVOS = {
 # UTILIDADES DE TEXTO
 # ============================================================
 
-def norm(value) -> str:
-    if pd.isna(value): return ""
-    text = str(value).strip().lower()
+@functools.lru_cache(maxsize=200_000)
+def _norm_text(raw: str) -> str:
+    text = raw.strip().lower()
     text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
     text = re.sub(r"[^a-z0-9\s]+", " ", text)
     return re.sub(r"\s+", " ", text).strip()
+
+
+def norm(value) -> str:
+    # Misma salida de siempre, pero cada texto distinto se normaliza una sola vez
+    # (las encuestas repiten muchísimo las mismas respuestas y los mismos alias).
+    if pd.isna(value): return ""
+    return _norm_text(str(value))
 
 def clean_col(value) -> str:
     if pd.isna(value): return ""
@@ -110,29 +125,114 @@ def safe_sheet_name(name: str) -> str:
     cleaned = re.sub(r"[\\/*?:\[\]]", " ", str(name)).strip()
     return cleaned[:31] or "Hoja"
 
+# --- Expresiones regulares de la configuración -------------------------------------------------
+# Las normalizaciones llegan desde la interfaz: un patrón como (a+)+$ haría que Python tarde horas en un
+# texto de 40 caracteres y bloquearía todo el servidor (ReDoS). Los patrones propios de la plataforma
+# (presets) son de confianza; los demás se aceptan solo si el análisis de su estructura no ve riesgo.
+MAX_PATTERN_CHARS = 200
+MAX_REGEX_SUBJECT_CHARS = 1000   # largo máximo del texto sobre el que se prueba un patrón no preestablecido
+MAX_WIDE_REPEATS = 2             # «.*algo.*» tiene 2; con más repeticiones el costo crece de forma polinómica
+_REPEAT_OPS = tuple(
+    getattr(_sre_constants, name) for name in ("MAX_REPEAT", "MIN_REPEAT", "POSSESSIVE_REPEAT")
+    if hasattr(_sre_constants, name)
+)
+
+
+@functools.lru_cache(maxsize=1)
+def _trusted_patterns() -> frozenset:
+    return frozenset(
+        item["pattern"] for group in (BANK_NORMALIZATIONS, CONGLOMERATE_NORMALIZATIONS) for item in group
+    )
+
+
+def _child_patterns(arg):
+    if isinstance(arg, _sre_parse.SubPattern):
+        yield arg
+    elif isinstance(arg, (tuple, list)):
+        for part in arg:
+            yield from _child_patterns(part)
+
+
+def _scan_regex(pattern, in_repeat: bool, stats: Dict) -> None:
+    for op, arg in pattern.data:
+        if op in (_sre_constants.GROUPREF, _sre_constants.GROUPREF_EXISTS):
+            stats["bad"] = True                      # las referencias hacia atrás pueden ser exponenciales
+        if op in _REPEAT_OPS:
+            _, high, body = arg
+            wide = high == _sre_constants.MAXREPEAT or high > 10
+            if wide:
+                stats["wide"] += 1
+                if in_repeat:
+                    stats["bad"] = True              # repetición dentro de otra repetición: (a+)+
+            _scan_regex(body, in_repeat or high > 1, stats)
+            continue
+        if op == _sre_constants.BRANCH and in_repeat:
+            stats["bad"] = True                      # (a|a)+ : alternativas que se solapan dentro de una repetición
+        for child in _child_patterns(arg):
+            _scan_regex(child, in_repeat, stats)
+
+
+@functools.lru_cache(maxsize=2048)
+def is_safe_regex(pattern: str) -> bool:
+    """True si el patrón es de la plataforma o su estructura no permite una explosión de tiempo."""
+    if not isinstance(pattern, str) or not pattern or len(pattern) > MAX_PATTERN_CHARS:
+        return False
+    if pattern in _trusted_patterns():
+        return True
+    try:
+        parsed = _sre_parse.parse(pattern)
+    except (re.error, RecursionError, OverflowError, ValueError):
+        return False
+    stats = {"bad": False, "wide": 0}
+    _scan_regex(parsed, False, stats)
+    return not stats["bad"] and stats["wide"] <= MAX_WIDE_REPEATS
+
+
 def apply_normalizations(value, normalizations: List[Dict]) -> str:
     if pd.isna(value):
         return value
     text = str(value).strip()
+    trusted = _trusted_patterns()
     for item in normalizations or []:
         pattern = item.get("pattern", "")
         replacement = item.get("replacement", "")
-        if not pattern: continue
+        if not pattern or not is_safe_regex(pattern):
+            continue
+        subject = text if pattern in trusted else text[:MAX_REGEX_SUBJECT_CHARS]
         try:
-            if re.search(pattern, text):
+            if re.search(pattern, subject):
                 return replacement
         except re.error:
             pass
     return text
+
+@functools.lru_cache(maxsize=8192)
+def _alias_pattern(alias_norm: str):
+    return re.compile(r"(^|\s)" + re.escape(alias_norm) + r"(\s|$)")
+
 
 def contains_entity(value, entity: str, aliases: Dict[str, List[str]]) -> bool:
     text = norm(value)
     if text in NEGATIVOS: return False
     for alias in aliases.get(entity, [entity]):
         alias_norm = norm(alias)
-        if alias_norm and re.search(r"(^|\s)" + re.escape(alias_norm) + r"(\s|$)", text):
+        if alias_norm and _alias_pattern(alias_norm).search(text):
             return True
     return False
+
+
+def flag_series(series: pd.Series, test) -> pd.Series:
+    """Aplica test(texto) -> bool a cada celda, evaluando solo los textos DISTINTOS.
+
+    Equivale a series.apply(test) (las celdas vacías dan False), pero en una columna con
+    miles de filas y pocas respuestas distintas hace una fracción de las llamadas.
+    """
+    missing = series.isna()
+    texts = series.astype(str)
+    lookup = {text: bool(test(text)) for text in texts[~missing].unique()}
+    result = texts.map(lambda text: lookup.get(text, False)).astype(bool)
+    result[missing] = False
+    return result
 
 
 # ============================================================
@@ -352,11 +452,11 @@ def build_analysis(df: pd.DataFrame, demo_cols: Dict, cfg: Dict, entities: List[
         tom_values = tom_values.apply(lambda value: first_mention(value, protected))
 
     for entity in entities:
-        tom = tom_values.apply(lambda value: contains_entity(value, entity, aliases)) if tom_col else pd.Series(False, index=df.index)
+        tom = flag_series(tom_values, lambda value: contains_entity(value, entity, aliases)) if tom_col else pd.Series(False, index=df.index)
         
         espontaneo = pd.Series(False, index=df.index)
         for col in esp_cols:
-            espontaneo = espontaneo | raw_df[col].apply(lambda value: contains_entity(value, entity, aliases))
+            espontaneo = espontaneo | flag_series(raw_df[col], lambda value: contains_entity(value, entity, aliases))
 
         aided_col = aided_map.get(entity)
         if aided_col is not None:
@@ -365,11 +465,11 @@ def build_analysis(df: pd.DataFrame, demo_cols: Dict, cfg: Dict, entities: List[
                 v_str = str(value).strip().lower()
                 if v_str in ["1", "si", "sí", "x", "seleccionado", "true"] or ent.lower() in v_str: return True
                 return contains_entity(value, ent, als)
-            ayudado = raw_df[aided_col].apply(lambda value: check_aided_value(value, entity, aliases))
+            ayudado = flag_series(raw_df[aided_col], lambda value: check_aided_value(value, entity, aliases))
         else:
             ayudado = pd.Series(False, index=df.index)
             for col in ayud_cols:
-                ayudado = ayudado | raw_df[col].apply(lambda value: contains_entity(value, entity, aliases))
+                ayudado = ayudado | flag_series(raw_df[col], lambda value: contains_entity(value, entity, aliases))
 
         indicators[(entity, "TOM")] = tom.astype(int)
         indicators[(entity, "Espontaneo")] = ((~tom) & espontaneo).astype(int)
@@ -455,31 +555,40 @@ def demographic_sections(df, demo_cols):
             sections.append((f"Demográfico - {label}", table))
     return sections
 
-def style_sheet(ws):
-    border = Border(left=Side(style="thin", color="BFBFBF"), right=Side(style="thin", color="BFBFBF"), top=Side(style="thin", color="BFBFBF"), bottom=Side(style="thin", color="BFBFBF"))
-    for row in ws.iter_rows():
+
+# Estilos compartidos: se crean una sola vez en vez de uno nuevo por celda.
+_BORDER = Border(left=Side(style="thin", color="BFBFBF"), right=Side(style="thin", color="BFBFBF"),
+                 top=Side(style="thin", color="BFBFBF"), bottom=Side(style="thin", color="BFBFBF"))
+_CENTER = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+
+def style_sheet(ws, header_only: bool = False):
+    rows = ws.iter_rows(min_row=1, max_row=1) if header_only else ws.iter_rows()
+    for row in rows:
         for cell in row:
-            cell.border = border
-            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            cell.border = _BORDER
+            cell.alignment = _CENTER
     for col_idx in range(1, ws.max_column + 1):
         ws.column_dimensions[get_column_letter(col_idx)].width = 24
+
 
 def write_main_sheet(wb, sheet_name, output_df):
     ws = wb.create_sheet(safe_sheet_name(sheet_name))
     for col_idx, column in enumerate(output_df.columns, start=1):
-        ws.cell(1, col_idx).value = str(column)
+        _safe_set(ws.cell(1, col_idx), str(column))
         ws.cell(1, col_idx).fill = PatternFill("solid", fgColor="D9EAF7")
         ws.cell(1, col_idx).font = Font(bold=True)
     for row_idx, row in enumerate(output_df.itertuples(index=False), start=2):
         for col_idx, value in enumerate(row, start=1):
-            ws.cell(row_idx, col_idx).value = value
-    style_sheet(ws)
+            _safe_set(ws.cell(row_idx, col_idx), value)
+    # En la hoja de datos (miles de filas) solo se da formato al encabezado: es lo que más tiempo ahorra.
+    style_sheet(ws, header_only=True)
 
 def write_sections_sheet(wb, sheet_name, sections):
     ws = wb.create_sheet(safe_sheet_name(sheet_name))
     row_idx = 1
     for title, df_table in sections:
-        ws.cell(row_idx, 1).value = title
+        _safe_set(ws.cell(row_idx, 1), title)
         ws.cell(row_idx, 1).fill = PatternFill("solid", fgColor="C6E0B4")
         ws.cell(row_idx, 1).font = Font(bold=True)
         row_idx += 1
@@ -488,14 +597,14 @@ def write_sections_sheet(wb, sheet_name, sections):
             row_idx += 3
             continue
         for col_idx, column in enumerate(df_table.columns, start=1):
-            ws.cell(row_idx, col_idx).value = column
+            _safe_set(ws.cell(row_idx, col_idx), column)
             ws.cell(row_idx, col_idx).fill = PatternFill("solid", fgColor="4472C4")
             ws.cell(row_idx, col_idx).font = Font(bold=True, color="FFFFFF")
         row_idx += 1
         for record in df_table.itertuples(index=False):
             for col_idx, value in enumerate(record, start=1):
                 cell = ws.cell(row_idx, col_idx)
-                cell.value = value
+                _safe_set(cell, value)
                 if str(df_table.columns[col_idx - 1]).endswith("%"):
                     cell.number_format = "0%"
             row_idx += 1

@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from core.llm import PROVIDER_CONFIG
@@ -17,7 +18,7 @@ from .. import accounts, policies
 from ..auth_models import User, UserApiKey
 from ..db import get_db
 from ..ratelimit import enforce, limit_by_ip, limit_by_user
-from ..security import create_access_token, decrypt_api_key, email_is_allowed, encrypt_api_key, hash_password, verify_password
+from ..security import create_access_token, decrypt_api_key, encrypt_api_key, hash_password, verify_password, verify_password_constant_time
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -45,6 +46,14 @@ def _session(user: User, policy: dict) -> dict:
     }
 
 
+def _session_user(db: Session, request: Request) -> User:
+    """Usuario de la sesión actual, leído de la base (el correo viene del token ya validado por el middleware)."""
+    user = db.scalar(select(User).where(func.lower(User.email) == request.state.user_email.lower()))
+    if user is None:
+        raise HTTPException(401, "La sesión no corresponde a un usuario activo.")
+    return user
+
+
 @router.post("/api/auth/register", dependencies=[Depends(limit_by_ip("register", 10, 3600))])
 def register(payload: AuthPayload, db: Session = Depends(get_db)):
     policy = policies.get_policy()
@@ -66,7 +75,11 @@ def register(payload: AuthPayload, db: Session = Depends(get_db)):
         role=accounts.new_user_role(db, email), password_changed_at=datetime.now(timezone.utc),
     )
     db.add(user)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:  # dos registros simultáneos con el mismo correo (o segundo super administrador)
+        db.rollback()
+        raise HTTPException(409, "Ya existe una cuenta con ese correo.")
     return _session(user, policy)
 
 
@@ -80,7 +93,9 @@ def login(payload: AuthPayload, db: Session = Depends(get_db)):
     if user is not None and user.locked_until is not None and user.locked_until > now:
         minutes = max(1, int((user.locked_until - now).total_seconds() // 60) + 1)
         raise HTTPException(423, f"Cuenta bloqueada temporalmente por intentos fallidos. Intenta de nuevo en {minutes} min.")
-    if not user or not verify_password(payload.password, user.password_hash):
+    # Se verifica SIEMPRE una contraseña (con un hash de relleno si el correo no existe): el tiempo de respuesta no delata qué cuentas existen
+    password_ok = verify_password_constant_time(payload.password, user.password_hash if user else None)
+    if user is None or not password_ok:
         if user is not None:
             user.failed_attempts = (user.failed_attempts or 0) + 1
             if user.failed_attempts >= policy["max_failed_logins"]:
@@ -114,9 +129,7 @@ def current_user(request: Request):
 def change_password(payload: ChangePasswordPayload, request: Request, db: Session = Depends(get_db)):
     """Cambio de contraseña propio (también es el paso obligatorio tras un restablecimiento del administrador)."""
     policy = policies.get_policy()
-    user = db.scalar(select(User).where(func.lower(User.email) == request.state.user_email.lower()))
-    if user is None:
-        raise HTTPException(401, "La sesión no corresponde a un usuario activo.")
+    user = _session_user(db, request)
     if not verify_password(payload.current_password, user.password_hash):
         raise HTTPException(400, "La contraseña actual no es correcta.")
     if payload.new_password == payload.current_password:
@@ -136,9 +149,7 @@ def change_password(payload: ChangePasswordPayload, request: Request, db: Sessio
 
 @router.get("/api/me/api-keys")
 def list_my_api_keys(request: Request, db: Session = Depends(get_db)):
-    user = db.scalar(select(User).where(func.lower(User.email) == request.state.user_email.lower()))
-    if user is None:
-        raise HTTPException(401, "La sesión no corresponde a un usuario activo.")
+    user = _session_user(db, request)
     records = db.scalars(select(UserApiKey).where(UserApiKey.user_id == user.id)).all()
     unreadable = []
     for record in records:
@@ -156,9 +167,7 @@ def save_my_api_key(provider: str, payload: ApiKeyPayload, request: Request, db:
     api_key = payload.api_key.strip()
     if not api_key:
         raise HTTPException(422, "La API key es obligatoria y no puede superar 4096 caracteres.")
-    user = db.scalar(select(User).where(func.lower(User.email) == request.state.user_email.lower()))
-    if user is None:
-        raise HTTPException(401, "La sesión no corresponde a un usuario activo.")
+    user = _session_user(db, request)
     record = db.get(UserApiKey, {"user_id": user.id, "provider": provider})
     if record is None:
         record = UserApiKey(user_id=user.id, provider=provider, encrypted_key=encrypt_api_key(api_key))
@@ -172,9 +181,7 @@ def save_my_api_key(provider: str, payload: ApiKeyPayload, request: Request, db:
 
 @router.delete("/api/me/api-keys/{provider}")
 def delete_my_api_key(provider: str, request: Request, db: Session = Depends(get_db)):
-    user = db.scalar(select(User).where(func.lower(User.email) == request.state.user_email.lower()))
-    if user is None:
-        raise HTTPException(401, "La sesión no corresponde a un usuario activo.")
+    user = _session_user(db, request)
     record = db.get(UserApiKey, {"user_id": user.id, "provider": provider})
     if record is not None:
         db.delete(record)

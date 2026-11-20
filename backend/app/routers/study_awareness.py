@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from core import awareness
-from ..common import _class_or_404, get_current_user_id
+from ..common import _class_or_404, get_current_user_id, public_error
 from ..db import get_db
 from ..models import Classification
 from ..schemas import AwarenessAnalysisRequest, AwarenessRequest
@@ -107,7 +107,7 @@ def calculate_awareness(
             })
     except Exception as exc:
         logger.exception("Fallo en calculate_awareness")
-        raise HTTPException(400, f"No se pudo calcular Awareness: {exc}") from exc
+        raise HTTPException(400, "No se pudo calcular Awareness: " + public_error(exc, "revisa la configuración de columnas y marcas.")) from exc
     base = len(frame) if not request.segment_column else int(
         (analysis_frame[request.segment_column].fillna("Sin dato").astype(str) == selected_value).sum()
     )

@@ -10,7 +10,9 @@ Este módulo no depende de FastAPI ni de la base de datos para poder probarse so
 """
 
 import json
+import logging
 import re
+import time
 from collections import Counter
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -18,10 +20,23 @@ import pandas as pd
 
 from . import awareness, brands
 
+log = logging.getLogger("awareness_flex")
+
 DEMO_KEYS = ["sexo", "edad", "departamento", "estrato", "ingreso"]
 RESERVED_ENTITIES = {"ninguna", "ninguno", "ns nr", "nsnr", "ns", "nr", "otra", "otro", "no responde", "no sabe"}
+MAX_ENTITIES = 500       # marcas (y marcas con alias) por configuración: acota el costo del agrupamiento por parecido
+MAX_NAME_CHARS = 120     # largo máximo de una marca o de un reemplazo de normalización
+MAX_NORMALIZATIONS = 100
 FUZZY_THRESHOLD = 88   # similitud mínima (0-100) para agrupar una variante con una marca
 FUZZY_MIN_LEN = 5      # por debajo de 5 letras solo se acepta coincidencia exacta (evita Puma = Pura)
+
+# Palabras que no distinguen una marca ("Droguería Olímpica" y "Olímpica" son la misma). Ajusta la lista si hace falta.
+GENERIC_WORDS = {
+    "drogueria", "droguerias", "drogueras", "drogas", "droga", "farmacia", "farmacias",
+    "la", "el", "los", "las", "de", "del", "y", "e",
+}
+CONTAIN_MIN_LEN = 4    # una respuesta distintiva más corta que esto no se agrupa (evita ruido)
+LENGTH_SLACK = 0.25    # no se compara por parecido si los largos difieren más de esto (no puede llegar al umbral)
 
 
 def presets() -> Dict[str, Dict[str, Any]]:
@@ -69,7 +84,12 @@ def presets() -> Dict[str, Dict[str, Any]]:
 def parse_config(raw) -> Dict[str, Any]:
     """Convierte y valida la configuración enviada por la interfaz."""
     data = json.loads(raw) if isinstance(raw, (str, bytes)) else dict(raw or {})
-    requested = [str(item).strip() for item in data.get("entities", []) if str(item).strip()]
+    raw_entities = data.get("entities", [])
+    if not isinstance(raw_entities, list):
+        raise ValueError("Las marcas deben ser una lista.")
+    requested = [str(item).strip() for item in raw_entities if str(item).strip()]
+    if len(requested) > MAX_ENTITIES or any(len(name) > MAX_NAME_CHARS for name in requested):
+        raise ValueError(f"Máximo {MAX_ENTITIES} marcas, de hasta {MAX_NAME_CHARS} caracteres cada una.")
     # "Ninguna", NS/NR u "Otra" no son marcas: nunca suman recordación, así que no se grafican.
     entities = [name for name in requested if awareness.norm(name) not in RESERVED_ENTITIES]
     ignored = [name for name in requested if name not in entities]
@@ -81,6 +101,20 @@ def parse_config(raw) -> Dict[str, Any]:
         raise ValueError("Los alias deben ser un objeto JSON {\"Marca\": [\"alias\", ...]}.")
     if not isinstance(normalizations, list):
         raise ValueError("Las normalizaciones deben ser una lista JSON.")
+    if len(aliases) > MAX_ENTITIES or any(not isinstance(values, list) or len(values) > 100 for values in aliases.values()):
+        raise ValueError(f"Máximo {MAX_ENTITIES} marcas con alias, y hasta 100 alias por marca.")
+    if len(normalizations) > MAX_NORMALIZATIONS:
+        raise ValueError(f"Máximo {MAX_NORMALIZATIONS} normalizaciones.")
+    for position, item in enumerate(normalizations, start=1):
+        if not isinstance(item, dict) or not isinstance(item.get("pattern", ""), str) or not isinstance(item.get("replacement", ""), str):
+            raise ValueError(f"La normalización {position} debe ser un objeto con «pattern» y «replacement» de texto.")
+        if len(item.get("replacement", "")) > MAX_NAME_CHARS:
+            raise ValueError(f"La normalización {position}: el reemplazo supera {MAX_NAME_CHARS} caracteres.")
+        if item.get("pattern") and not awareness.is_safe_regex(item["pattern"]):
+            raise ValueError(
+                f"La normalización {position} usa un patrón no permitido (demasiado largo, con repeticiones anidadas, "
+                f"referencias hacia atrás o más de {awareness.MAX_WIDE_REPEATS} comodines «.*»). Simplifícalo."
+            )
     demographics = {key: str((data.get("demographics") or {}).get(key, "") or "") for key in DEMO_KEYS}
     tom_first_only = bool(data.get("tom_first_only", True))
     fuzzy = bool(data.get("fuzzy", True))
@@ -135,10 +169,6 @@ def _pieces(value) -> List[str]:
     return [part.strip() for part in awareness._FIRST_MENTION_SPLIT.split(text) if part.strip()]
 
 
-def _compact(text: str) -> str:
-    return awareness.norm(text).replace(" ", "")
-
-
 def _is_noise(piece: str) -> bool:
     key = awareness.norm(piece)
     return (not key) or key in awareness.NEGATIVOS or key in RESERVED_ENTITIES or key.replace(" ", "").isdigit()
@@ -172,36 +202,78 @@ def _observed(frame: pd.DataFrame, columns: List[str]) -> Tuple[Counter, Dict[st
     return counts, spellings
 
 
-def learn_variants(frame: pd.DataFrame, config: Dict[str, Any]) -> Tuple[Dict[str, List[str]], List[Dict[str, Any]]]:
-    """Agrega como alias las respuestas escritas parecido a una marca ("Decatlon" -> "Decathlon").
+def _distinctive(text: str) -> List[str]:
+    """Palabras de un nombre sin las genéricas: "Drogas la rebaja" -> ["rebaja"]."""
+    return [token for token in awareness.norm(text).split() if token not in GENERIC_WORDS]
 
-    Devuelve (alias completos, lista de variantes aprendidas para mostrar al usuario).
+
+def _contains_run(haystack: List[str], needle: List[str]) -> bool:
+    size = len(needle)
+    return size > 0 and any(haystack[i:i + size] == needle for i in range(len(haystack) - size + 1))
+
+
+def _match_by_distinctive_name(key: str, entity_forms: Dict[str, List[List[str]]]) -> Optional[str]:
+    """Marca cuyo nombre distintivo contiene lo que escribió la persona; None si no hay o es ambigua."""
+    tokens = _distinctive(key)
+    if not tokens or len("".join(tokens)) < CONTAIN_MIN_LEN:
+        return None
+    hits = [entity for entity, forms in entity_forms.items() if any(_contains_run(form, tokens) for form in forms)]
+    return hits[0] if len(hits) == 1 else None
+
+
+def learn_variants(frame: pd.DataFrame, config: Dict[str, Any]) -> Tuple[Dict[str, List[str]], List[Dict[str, Any]]]:
+    """Agrega como alias las respuestas que corresponden a una marca aunque estén incompletas o con typos.
+
+    Dos reglas: (1) nombre distintivo ("La rebaja" -> "Drogas la rebaja") y (2) similitud por typos
+    ("Decatlon" -> "Decathlon"). Devuelve (alias completos, variantes aprendidas para mostrar al usuario).
     """
     aliases = {entity: list(config["aliases"].get(entity) or [entity]) for entity in config["entities"]}
     if not config.get("fuzzy", True):
         return aliases, []
     counts, spellings = _observed(frame, _text_columns(frame, config))
-    names = {entity: {awareness.norm(entity)} | {awareness.norm(a) for a in aliases[entity]} for entity in aliases}
+    compact_forms: Dict[str, set] = {}
+    for entity, values in aliases.items():
+        forms = {awareness.norm(entity).replace(" ", "")} | {awareness.norm(a).replace(" ", "") for a in values}
+        compact_forms[entity] = {form for form in forms if len(form) >= FUZZY_MIN_LEN}
+    entity_forms = {
+        entity: [form for form in ([_distinctive(entity)] + [_distinctive(a) for a in aliases[entity]]) if form]
+        for entity in aliases
+    }
     learned: List[Dict[str, Any]] = []
-    for key, count in counts.most_common():
+
+    def learn(key: str, entity: str, count: int) -> None:
+        aliases[entity].append(key)
         compact = key.replace(" ", "")
-        if len(compact) < FUZZY_MIN_LEN:
-            continue
+        if len(compact) >= FUZZY_MIN_LEN:
+            compact_forms[entity].add(compact)
+        distinctive = _distinctive(key)
+        if distinctive and distinctive not in entity_forms[entity]:
+            entity_forms[entity].append(distinctive)
+        learned.append({"variante": spellings[key].most_common(1)[0][0], "marca": entity, "n": int(count)})
+
+    for key, count in counts.most_common():
+        if not _distinctive(key):
+            continue  # solo palabras genéricas ("Droguería"): no se puede asignar a una marca
         if any(awareness.contains_entity(key, entity, aliases) for entity in aliases):
             continue  # ya la reconoce un alias exacto
+        matched = _match_by_distinctive_name(key, entity_forms)
+        if matched:
+            learn(key, matched, count)
+            continue
+        compact = key.replace(" ", "")
+        size = len(compact)
+        if size < FUZZY_MIN_LEN:
+            continue
         best, best_score = None, 0.0
-        for entity, forms in names.items():
+        for entity, forms in compact_forms.items():
             for form in forms:
-                form_compact = form.replace(" ", "")
-                if len(form_compact) < FUZZY_MIN_LEN:
-                    continue
-                score = brands.similarity(compact, form_compact)
+                if abs(size - len(form)) > LENGTH_SLACK * max(size, len(form)):
+                    continue  # con tanta diferencia de largo no puede llegar al umbral
+                score = brands.similarity(compact, form)
                 if score > best_score:
                     best, best_score = entity, score
         if best is not None and best_score >= FUZZY_THRESHOLD:
-            aliases[best].append(key)
-            names[best].add(key)
-            learned.append({"variante": spellings[key].most_common(1)[0][0], "marca": best, "n": int(count)})
+            learn(key, best, count)
     return aliases, learned
 
 
@@ -274,13 +346,19 @@ def _coverage(frame: pd.DataFrame, cfg: Dict[str, Any], indicators: pd.DataFrame
 
 def generate_report(frame: pd.DataFrame, config: Dict[str, Any]) -> bytes:
     """Excel final idéntico al de la app Streamlit original (con variantes parecidas agrupadas)."""
-    frame, config, _ = _prepare(frame, config)
+    started = time.perf_counter()
+    frame, config, learned = _prepare(frame, config)
+    grouped = time.perf_counter()
     demo_cols = {key: awareness.find_col(frame, config["demographics"].get(key, "")) for key in DEMO_KEYS}
     cfg1, cfg2 = config["analyses"]
-    return awareness.build_excel_bytes(
+    data = awareness.build_excel_bytes(
         frame, demo_cols, cfg1, cfg2, config["entities"], config["aliases"],
         config["normalizations"], config["expected_raw_cols"],
     )
+    finished = time.perf_counter()
+    log.info("Excel awareness: %d filas, %d variantes agrupadas en %.1fs, Excel armado en %.1fs",
+             len(frame), len(learned), grouped - started, finished - grouped)
+    return data
 
 
 def preview_results(frame: pd.DataFrame, config: Dict[str, Any]) -> Dict[str, Any]:

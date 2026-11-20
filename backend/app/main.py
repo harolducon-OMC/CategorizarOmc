@@ -5,8 +5,10 @@ study_awareness) y en app/awareness_flex.py (Awareness independiente).
 """
 import logging
 import os
+import re
 import time
 import uuid
+from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 load_dotenv()  # lee el .env de la raíz también cuando Uvicorn se lanza desde backend/
@@ -29,17 +31,39 @@ init_sentry()
 logger = logging.getLogger("insights.api")
 SLOW_REQUEST_SECONDS = float(os.getenv("SLOW_REQUEST_SECONDS", "5"))
 PASSWORD_CHANGE_PATHS = {"/api/auth/change-password", "/api/auth/me"}
+_REQUEST_ID_OK = re.compile(r"[A-Za-z0-9._-]{1,64}")
+DOCS_PREFIXES = ("/docs", "/openapi.json", "/redoc")
+MAX_JSON_BYTES = 2 * 1024 * 1024  # los JSON de la API son pequeños; los archivos (multipart) tienen su propio límite de 25 MB
 
-app = FastAPI(title="Plataforma de Insights API", version="1.0.0")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    initialize_platform()
+    yield
+
+
+# DISABLE_API_DOCS=1 oculta /docs, /redoc y /openapi.json (recomendado en producción: no exponen el mapa de la API).
+_DOCS_OFF = os.getenv("DISABLE_API_DOCS", "").strip().lower() in {"1", "true", "yes", "si", "sí"}
+app = FastAPI(
+    title="Plataforma de Insights API", version="1.0.0", lifespan=lifespan,
+    docs_url=None if _DOCS_OFF else "/docs", redoc_url=None if _DOCS_OFF else "/redoc",
+    openapi_url=None if _DOCS_OFF else "/openapi.json",
+)
 
 
 @app.middleware("http")
 async def security_middleware(request: Request, call_next):
-    request_id = (request.headers.get("X-Request-ID") or uuid.uuid4().hex[:12])[:64]
+    supplied_id = request.headers.get("X-Request-ID", "")
+    # El identificador entra a los logs: solo se acepta si es «seguro»; si no, se genera uno nuevo
+    request_id = supplied_id if _REQUEST_ID_OK.fullmatch(supplied_id) else uuid.uuid4().hex[:12]
     request_id_ctx.set(request_id)
     started = time.monotonic()
     path = request.url.path
-    public = path in {"/api/health", "/api/auth/register", "/api/auth/login", "/api/telemetry/vitals"} or path.startswith("/docs") or path.startswith("/openapi.json") or path.startswith("/redoc")
+    public = path in {"/api/health", "/api/auth/register", "/api/auth/login", "/api/telemetry/vitals"} or path.startswith(DOCS_PREFIXES)
+    if request.method in {"POST", "PUT", "PATCH"} and request.headers.get("content-type", "").startswith("application/json"):
+        declared = request.headers.get("content-length", "")
+        if declared.isdigit() and int(declared) > MAX_JSON_BYTES:
+            return JSONResponse({"detail": "El cuerpo de la petición es demasiado grande."}, status_code=413, headers={"X-Request-ID": request_id})
     if path.startswith("/api/") and request.method != "OPTIONS" and not public:
         auth_header = request.headers.get("Authorization", "")
         scheme, _, token = auth_header.partition(" ")
@@ -61,6 +85,7 @@ async def security_middleware(request: Request, call_next):
         if status["must_change_password"] and path not in PASSWORD_CHANGE_PATHS:
             return denied(403, "Debes cambiar tu contraseña temporal antes de continuar.", "password_change_required")
         request.state.user_email = claims["sub"]
+        request.state.user_id = status["id"]
         request.state.user_role = status["role"]
         request.state.must_change_password = status["must_change_password"]
     response = await call_next(request)
@@ -73,7 +98,11 @@ async def security_middleware(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Cache-Control"] = "no-store" if path.startswith("/api/auth") else "no-cache"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    if not path.startswith(DOCS_PREFIXES):  # Swagger/ReDoc necesitan scripts propios; la API JSON no necesita ninguno
+        response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
+    response.headers["Cache-Control"] = "no-store" if path.startswith("/api/auth") or path.startswith("/api/me") else "no-cache"
     return response
 
 
@@ -93,7 +122,9 @@ for _router_module in (auth, admin, system, studies, classifications, study_awar
     app.include_router(_router_module.router)
 
 
-CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",") if o.strip()]
+CORS_ORIGINS = [o.strip().rstrip("/") for o in os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",") if o.strip()]
+if "*" in CORS_ORIGINS:  # con credenciales, «*» permitiría que cualquier sitio use la sesión del usuario
+    raise RuntimeError("CORS_ORIGINS no puede contener «*». Lista los orígenes exactos del frontend.")
 
 # Comprime respuestas JSON grandes (los .xlsx y el streaming de IA se envían con Content-Encoding: identity)
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
@@ -101,13 +132,14 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-LLM-API-Key", "X-Request-ID"],
+    expose_headers=["X-Request-ID", "Content-Disposition", "Retry-After"],
 )
 
 
-@app.on_event("startup")
-def create_tables():
+def initialize_platform():
+    """Validación de seguridad, tablas, super administrador y políticas (se ejecuta al arrancar la API)."""
     validate_security_config()
     if os.getenv("AUTO_CREATE_TABLES", "1") != "0":
         Base.metadata.create_all(bind=engine)

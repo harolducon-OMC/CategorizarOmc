@@ -194,6 +194,12 @@ Responden `429` con la cabecera `Retry-After`. Son en memoria y por instancia (s
 
 Para desactivarlos en local: `RATE_LIMIT_DISABLED=1`. Los números están en `app/routers/*.py` y `app/awareness_flex.py`.
 
+**IP real del cliente (`TRUSTED_PROXY_HOPS`).** Los límites por IP leen `X-Forwarded-For` contando desde la derecha, porque el cliente puede escribir esa cabecera. Pon en la API el número de proxies de confianza que hay delante: `0` en local y con Docker Compose, `1` si Render recibe el tráfico directamente y `2` si pasa por Vercel (rewrite `/api`) y luego Render. Si el valor es mayor que el real, un cliente puede falsificar su IP y esquivar el límite; si es menor, todos los usuarios comparten el mismo contador. Compruébalo una vez en producción: haz peticiones desde dos redes distintas y revisa que los límites se cuenten por separado.
+
+**Tamaño de las peticiones.** Los cuerpos JSON están limitados a 2 MB (`MAX_JSON_BYTES` en `app/main.py`); los archivos tienen su propio límite de 25 MB.
+
+**Normalizaciones de Awareness.** Los patrones (expresiones regulares) que llegan desde la interfaz se validan para evitar ReDoS: máximo 200 caracteres, sin repeticiones anidadas ni referencias hacia atrás y hasta 2 comodines largos (`.*`). Los patrones de los presets (Bancos y Conglomerados) están exentos. Ver `is_safe_regex` en `backend/core/awareness.py`.
+
 ### Registros (logs) y Sentry
 - Cada petición recibe un `X-Request-ID` (también aparece en los logs y en el JSON de los errores 500) para rastrear un problema.
 - Las peticiones que tardan más de `SLOW_REQUEST_SECONDS` (5 por defecto) y los errores 5xx se registran.
