@@ -30,6 +30,10 @@ type AnalysisResult = {
 const NETWORKS = ['Twitter', 'Instagram', 'Tiktok', 'Reddit']
 const LANGUAGES = [{ code: 'es', label: 'Español' }, { code: 'en', label: 'Inglés' }, { code: 'pt', label: 'Portugués' }, { code: 'fr', label: 'Francés' }]
 const MODEL_DEFAULTS: Record<string, string> = { gemini: 'gemini-3.5-flash-lite', groq: 'llama-3.3-70b-versatile' }
+const MODEL_OPTIONS: Record<'gemini' | 'groq', string[]> = {
+  gemini: ['gemini-3.5-flash-lite', 'gemini-3.6-flash', 'gemini-2.5-flash-lite'],
+  groq: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'],
+}
 const SENTIMENTS: Sentiment[] = ['positivo', 'neutral', 'negativo']
 
 function csvCell(value: unknown) {
@@ -106,10 +110,10 @@ export function SocialListeningPage({ onOpenSettings }: { onOpenSettings: () => 
         <fieldset className="social-option-group"><legend>Redes sociales</legend><div className="social-checks">{NETWORKS.map((network) => <label className="social-check" key={network}><input type="checkbox" checked={platforms.includes(network)} onChange={() => toggle(setPlatforms, platforms, network)} />{network}</label>)}</div></fieldset>
         <fieldset className="social-option-group"><legend>Idioma</legend><div className="social-checks">{LANGUAGES.map((language) => <label className="social-check" key={language.code}><input type="checkbox" checked={languages.includes(language.code)} onChange={() => toggle(setLanguages, languages, language.code)} />{language.label}</label>)}</div><small>Sin selección: todos los idiomas.</small></fieldset>
       </div>
-      <div className="social-ai-row"><label>Proveedor de análisis<select value={provider} onChange={(e) => { const value = e.target.value as 'gemini' | 'groq'; setProvider(value); setModel(MODEL_DEFAULTS[value]) }}><option value="gemini">Google Gemini · clave independiente</option><option value="groq">Groq · clave independiente</option></select></label><label className="social-model-field">ID del modelo<input value={model} onChange={(e) => setModel(e.target.value)} maxLength={160} /></label></div>
+      <div className="social-ai-row"><label>Proveedor de análisis<select value={provider} onChange={(e) => { const value = e.target.value as 'gemini' | 'groq'; setProvider(value); setModel(MODEL_DEFAULTS[value]) }}><option value="gemini">Google Gemini · clave independiente</option><option value="groq">Groq · clave independiente</option></select></label><label className="social-model-field">Modelo<select value={MODEL_OPTIONS[provider].includes(model) ? model : '__custom__'} onChange={(e) => setModel(e.target.value === '__custom__' ? '' : e.target.value)}><optgroup label={provider === 'gemini' ? 'Google Gemini' : 'Groq'}>{MODEL_OPTIONS[provider].map((item) => <option key={item} value={item}>{item}</option>)}</optgroup><option value="__custom__">Otro (escribir ID)</option></select>{!MODEL_OPTIONS[provider].includes(model) && <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="Escribe el ID exacto del modelo" maxLength={160} aria-label="ID personalizado del modelo" />}</label></div>
       <label className="social-comments"><input type="checkbox" checked={withComments} onChange={(e) => setWithComments(e.target.checked)} /><span>Incluir comentarios de Instagram y TikTok <small>Puede consumir créditos adicionales de Xpoz.</small></span></label>
       <div className="social-form-footer"><span className="social-private-note">Las claves se configuran en Ajustes y nunca se muestran aquí.</span><button className="button-primary social-run" type="submit" disabled={loading}>{loading ? <><span className="social-spinner" /> Analizando…</> : <><Sparkles size={15} /> Analizar menciones</>}</button></div>
-      {loading && <div className="social-loading" role="status">Consultando redes y clasificando menciones con {provider === 'gemini' ? 'Gemini' : 'Groq'}. Puede tardar un poco.</div>}
+      {loading && <div className="social-loading" role="status" aria-live="polite"><div className="social-progress" aria-label="Análisis en curso"><span /></div><span>Consultando redes y clasificando menciones con {provider === 'gemini' ? 'Gemini' : 'Groq'}. Puede tardar un poco.</span></div>}
       {error && <div className="social-error" role="alert">{error}{/clave|configur/i.test(error) && <button type="button" className="button-text" onClick={onOpenSettings}>Abrir Ajustes</button>}</div>}
     </form>
 
