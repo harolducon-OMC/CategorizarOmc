@@ -27,6 +27,7 @@ const SUGGESTIONS: Record<Page, string[]> = {
   categorize: ['¿Cómo categorizo por temas?', '¿Qué significa «Otros» y «Ninguna»?', '¿Para qué sirven los diccionarios?'],
   dashboard: ['¿Cómo corrijo etiquetas?', '¿Cómo mido la calidad de la categorización?', '¿Cómo se generan los insights?'],
   awareness: ['¿Qué diferencia hay entre TOM, espontáneo y ayudado?', '¿Awareness usa lo que categoricé?', '¿Cómo escribo los códigos de pregunta?'],
+  social: ['¿Qué claves necesita Escucha social?', '¿Las claves sociales se usan para categorizar?', '¿Se guardan las menciones analizadas?'],
   settings: ['¿Dónde guardo mi API key?', '¿Qué proveedor de IA elijo?', '¿Cómo protegen mis datos?'],
   admin: ['¿Qué puede hacer cada rol?', '¿Cómo restablezco la contraseña de alguien?', '¿Qué políticas de seguridad puedo configurar?'],
 }

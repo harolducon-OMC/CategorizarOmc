@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
-import { Activity, BarChart3, ChevronDown, CircleHelp, Database, LayoutDashboard, KeyRound, Settings2, ShieldCheck, Tags, UsersRound, X } from 'lucide-react'
+import { Activity, BarChart3, ChevronDown, CircleHelp, Database, LayoutDashboard, KeyRound, Radio, Settings2, ShieldCheck, Tags, UsersRound, X } from 'lucide-react'
 import { api } from './api'
 import { NavButton } from './components/common'
 import { PROVIDERS } from './constants'
@@ -19,6 +19,7 @@ const DashboardPage = lazy(() => import('./pages/DashboardPage').then((m) => ({ 
 const SettingsPage = lazy(() => import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })))
 const AdminPage = lazy(() => import('./pages/AdminPage').then((m) => ({ default: m.AdminPage })))
 const CategorizeWorkflow = lazy(() => import('./CategorizeWorkflow'))
+const SocialListeningPage = lazy(() => import('./pages/SocialListeningPage').then((m) => ({ default: m.SocialListeningPage })))
 
 function App() {
   const [page, setPage] = useState<Page>('home')
@@ -145,7 +146,7 @@ function App() {
 
   const activeClassifications: Classification[] = study?.classifications || []
   const activePageTitle: Record<Page, string> = {
-    home: 'Inicio', categorize: 'Categorización', dashboard: 'Dashboard', awareness: 'Awareness', settings: 'Ajustes', admin: 'Administración',
+    home: 'Inicio', categorize: 'Categorización', dashboard: 'Dashboard', awareness: 'Awareness', social: 'Escucha social', settings: 'Ajustes', admin: 'Administración',
   }
 
   if (!authChecked) return <div className="auth-shell"><div className="auth-card">Validando sesión…</div></div>
@@ -169,6 +170,7 @@ function App() {
           <NavButton active={page === 'categorize'} onClick={() => setPage('categorize')} icon={<Tags size={18} />} label="Categorización" />
           <NavButton active={page === 'dashboard'} onClick={() => setPage('dashboard')} icon={<BarChart3 size={18} />} label="Dashboard" />
           <NavButton active={page === 'awareness'} onClick={() => setPage('awareness')} icon={<UsersRound size={18} />} label="Awareness" />
+          <NavButton active={page === 'social'} onClick={() => setPage('social')} icon={<Radio size={18} />} label="Escucha social" />
           {role !== 'user' && <NavButton active={page === 'admin'} onClick={() => setPage('admin')} icon={<ShieldCheck size={18} />} label="Administración" />}
         </nav>
         <div className="sidebar-divider" />
@@ -217,6 +219,7 @@ function App() {
           {page === 'admin' && role !== 'user' && <AdminPage role={role} email={userEmail} onNotice={setNotice} />}
           {page === 'dashboard' && <DashboardPage study={study} apiKey={apiKey} provider={provider} model={model} onNotice={setNotice} />}
           {page === 'awareness' && <AwarenessHub study={study} onNotice={setNotice} />}
+          {page === 'social' && <SocialListeningPage onOpenSettings={() => setPage('settings')} />}
           {page === 'settings' && <SettingsPage provider={provider} model={model} apiKey={apiKey} setApiKey={setApiKey} onProvider={changeProvider} setModel={setModel} onKeysChanged={refreshKeys} />}
           </Suspense>}
         </div>

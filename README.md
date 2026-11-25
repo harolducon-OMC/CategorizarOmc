@@ -289,3 +289,20 @@ Nadie puede actuar sobre su propia cuenta ni sobre el super administrador desde 
 **Privacidad.** El panel muestra cuentas y cuántos estudios tiene cada una, nunca su contenido. Al eliminar una cuenta se borran también sus estudios (derecho de supresión).
 
 **Límites que conviene conocer.** La caché de estado y de políticas es por instancia: con varias instancias el cambio puede tardar unos segundos. Los administradores pueden editar políticas; si prefieres que solo lo haga el super administrador, cambia la dependencia de `update_policies` en `backend/app/routers/admin.py`. No hay creación de cuentas por parte del administrador: las personas se registran solas y, si cierras el registro en las políticas, nadie nuevo podrá entrar hasta reabrirlo.
+
+## Módulo Escucha social
+
+La navegación lateral incluye **Escucha social**, un módulo independiente del flujo de Categorización. Consulta menciones públicas mediante Xpoz (MCP) y analiza sentimiento, temas, emoción y posibles señales de riesgo con Gemini o Groq. Permite elegir redes, idioma y volumen de resultados; los comentarios de Instagram/TikTok pueden consumir créditos adicionales de Xpoz.
+
+### Credenciales de Escucha social
+
+En **Ajustes → Credenciales independientes → Escucha social**, cada usuario puede guardar, reemplazar o eliminar:
+
+- **Xpoz**, necesaria para consultar las redes.
+- **Google Gemini** y **Groq**, guardadas por separado y usadas solo si ese proveedor se selecciona para el análisis social.
+
+Estas claves se cifran en el backend y usan identificadores distintos de `gemini`, `groq` y los demás proveedores del categorizador. Por tanto, guardar una clave social de Gemini o Groq **no reemplaza ni lee** la clave configurada para categorizar. Las claves no se devuelven al navegador después de guardarse; para cambiarlas, se introduce una nueva.
+
+El módulo hace sus solicitudes desde FastAPI, requiere sesión iniciada y limita los análisis por usuario. Las menciones del informe se mantienen solo en el estado de la pantalla y **no se persisten como estudios** en PostgreSQL; se eliminan al salir de esa página o cerrar la sesión del navegador. Aun así, el contenido de publicaciones públicas se envía a Xpoz y al proveedor de IA seleccionado para el análisis; aplica la política de privacidad de tu organización antes de usarlo.
+
+La instalación existente (`pip install -r backend/requirements.txt`, `docker compose up --build`) instalará las dependencias nuevas del cliente MCP de Xpoz y de detección de idioma. Si usas el lock reproducible, instala con `pip install -r backend/requirements.lock.txt`.

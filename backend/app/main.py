@@ -23,7 +23,7 @@ from .awareness_flex import router as awareness_flex_router
 from .common import _class_or_404, _labels_without_blank_responses, get_current_user_id  # noqa: F401  (compatibilidad con pruebas e importaciones previas)
 from .db import Base, SessionLocal, engine
 from .observability import init_sentry, init_tracing, request_id_ctx, setup_logging
-from .routers import admin, auth, classifications, study_awareness, studies, system
+from .routers import admin, auth, classifications, social_listening, study_awareness, studies, system
 from .security import token_claims, validate_security_config
 
 setup_logging()
@@ -118,7 +118,7 @@ async def unhandled_error(request: Request, exc: Exception):
 
 init_tracing(app, engine)
 app.include_router(awareness_flex_router)
-for _router_module in (auth, admin, system, studies, classifications, study_awareness):
+for _router_module in (auth, admin, system, studies, classifications, study_awareness, social_listening):
     app.include_router(_router_module.router)
 
 

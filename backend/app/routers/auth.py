@@ -150,7 +150,11 @@ def change_password(payload: ChangePasswordPayload, request: Request, db: Sessio
 @router.get("/api/me/api-keys")
 def list_my_api_keys(request: Request, db: Session = Depends(get_db)):
     user = _session_user(db, request)
-    records = db.scalars(select(UserApiKey).where(UserApiKey.user_id == user.id)).all()
+    # Las claves de Escucha social viven en su propio espacio y no deben aparecer
+    # como proveedores disponibles para categorización o insights.
+    records = db.scalars(select(UserApiKey).where(
+        UserApiKey.user_id == user.id, UserApiKey.provider.in_(PROVIDER_CONFIG)
+    )).all()
     unreadable = []
     for record in records:
         try:
@@ -181,6 +185,8 @@ def save_my_api_key(provider: str, payload: ApiKeyPayload, request: Request, db:
 
 @router.delete("/api/me/api-keys/{provider}")
 def delete_my_api_key(provider: str, request: Request, db: Session = Depends(get_db)):
+    if provider not in PROVIDER_CONFIG:
+        raise HTTPException(400, "Proveedor de IA no reconocido.")
     user = _session_user(db, request)
     record = db.get(UserApiKey, {"user_id": user.id, "provider": provider})
     if record is not None:
