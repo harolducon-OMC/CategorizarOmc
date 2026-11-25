@@ -292,7 +292,7 @@ Nadie puede actuar sobre su propia cuenta ni sobre el super administrador desde 
 
 ## Módulo Escucha social
 
-La navegación lateral incluye **Escucha social**, un módulo independiente del flujo de Categorización. Consulta menciones públicas mediante Xpoz (MCP) y analiza sentimiento, temas, emoción y posibles señales de riesgo con Gemini o Groq. Permite elegir redes, idioma y volumen de resultados; los comentarios de Instagram/TikTok pueden consumir créditos adicionales de Xpoz.
+La navegación lateral incluye **Escucha social**, un módulo independiente del flujo de Categorización. Consulta menciones públicas mediante Xpoz (MCP) y analiza sentimiento, temas, emoción y posibles señales de riesgo con Gemini o Groq. Permite elegir redes, idioma y volumen de resultados; los comentarios de Instagram/TikTok pueden consumir créditos adicionales de Xpoz. La búsqueda se limita a los últimos 365 días y el backend descarta resultados antiguos o sin una fecha de publicación verificable.
 
 ### Credenciales de Escucha social
 

@@ -31,6 +31,7 @@ import re
 import time
 import unicodedata
 from collections import Counter
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 from mcp import ClientSession
@@ -60,8 +61,8 @@ PROVIDERS = {
     "groq": {
         "base_url": "https://api.groq.com/openai/v1",
         "key_env": "GROQ_API_KEY",
-        "model": "llama-3.3-70b-versatile",
-        "models": ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
+        "model": "openai/gpt-oss-20b",
+        "models": ["openai/gpt-oss-20b", "openai/gpt-oss-120b"],
     },
     "gemini": {
         "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
@@ -166,6 +167,48 @@ def _pick_lang(r: dict) -> str:
     return ""
 
 
+DATE_KEYS = ("createdatdate", "createdat", "created_at", "createdutc", "created_utc",
+             "timestamp", "publishedat", "published_at", "datecreated", "creationdate", "date")
+
+
+def _pick_created_at(r: dict) -> str | None:
+    """Extrae la fecha de publicación de campos comunes de Xpoz y la normaliza a UTC ISO."""
+    normalized = {str(key).lower(): value for key, value in r.items()}
+    for key in DATE_KEYS:
+        value = normalized.get(key)
+        if value in (None, ""):
+            continue
+        try:
+            if isinstance(value, (int, float)) or re.fullmatch(r"\d+(?:\.\d+)?", str(value).strip()):
+                stamp = float(value)
+                if stamp > 10_000_000_000:
+                    stamp /= 1000
+                parsed = datetime.fromtimestamp(stamp, tz=timezone.utc)
+            else:
+                parsed = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                parsed = parsed.astimezone(timezone.utc)
+            return parsed.isoformat()
+        except (ValueError, OverflowError, OSError, TypeError):
+            continue
+    return None
+
+
+def _within_date_window(mention: dict, cutoff: datetime) -> bool:
+    """Solo conserva menciones con fecha verificable y dentro del rango solicitado."""
+    raw = mention.get("created_at")
+    if not raw:
+        return False
+    try:
+        created = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        return created.astimezone(timezone.utc) >= cutoff
+    except (ValueError, OverflowError, TypeError):
+        return False
+
+
 URL_SKIP = ("avatar", "image", "img", "media", "profile", "thumbnail", "photo",
             "picture", "video", "cover", "icon", "banner")
 
@@ -258,6 +301,7 @@ def _to_mentions(platform: str, payload_text: str, kind: str = "post") -> list[d
                     "lang": _pick_lang(r),
                     "location": _pick_location(r),
                     "url": _pick_url(platform, r, kind),
+                    "created_at": _pick_created_at(r),
                     "kind": kind,
                     "raw": r,
                 }
@@ -375,11 +419,8 @@ async def collect(
 
     headers = {"Authorization": f"Bearer {(xpoz_key or os.environ['XPOZ_API_KEY']).strip()}"}
     wanted_langs = [l.lower().split("-")[0] for l in langs] if langs else []
-    start_date = None
-    if days:
-        import datetime as _dt
-
-        start_date = (_dt.date.today() - _dt.timedelta(days=days)).isoformat()
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days) if days is not None and days > 0 else None
+    start_date = cutoff.date().isoformat() if cutoff else None
     LAST_DISCARDED.clear()
     mentions: list[dict] = []
     posts_by_platform: dict[str, list[dict]] = {}
@@ -401,9 +442,20 @@ async def collect(
                     args["fields"] = FIELDS[platform]
                 if start_date:
                     args["startDate"] = start_date
-                text = await _call(s, name, args, basic)
+                fallback = {**basic, **({"startDate": start_date} if start_date else {})}
+                text = await _call(s, name, args, fallback)
                 found = _to_mentions(platform, text, kind) if text else []
                 raw_n = len(found)
+                recent_n = raw_n
+                if cutoff:
+                    recent = [m for m in found if _within_date_window(m, cutoff)]
+                    recent_n = len(recent)
+                    recent_ids = {id(m) for m in recent}
+                    LAST_DISCARDED.extend(
+                        {**_slim(m), "motivo": f"más de {days} días o fecha no disponible"}
+                        for m in found if id(m) not in recent_ids
+                    )
+                    found = recent
                 if strict_brand:
                     kept = [m for m in found if _mentions_brand(brand, m["text"])]
                     ids = {id(m) for m in kept}
@@ -412,7 +464,8 @@ async def collect(
                 brand_n = len(found)
                 if wanted_langs:
                     found = _apply_lang(found, wanted_langs)
-                log(f"{name}: {raw_n} crudas -> {brand_n} con la marca -> {len(found)} tras idioma")
+                age_stage = f" -> {recent_n} dentro de {days} días" if cutoff else ""
+                log(f"{name}: {raw_n} crudas{age_stage} -> {brand_n} con la marca -> {len(found)} tras idioma")
                 found = found[:per_platform]
                 mentions += found
                 if kind == "post":
@@ -431,6 +484,14 @@ async def collect(
                         basic = {"postId": pid, "limit": comments_per_post}
                         text = await _call(s, tool, basic)
                         cs = _to_mentions(platform, text, "comentario") if text else []
+                        if cutoff:
+                            recent_comments = [c for c in cs if _within_date_window(c, cutoff)]
+                            recent_ids = {id(c) for c in recent_comments}
+                            LAST_DISCARDED.extend(
+                                {**_slim(c), "motivo": f"más de {days} días o fecha no disponible"}
+                                for c in cs if id(c) not in recent_ids
+                            )
+                            cs = recent_comments
                         if wanted_langs:
                             cs = _apply_lang(cs, wanted_langs)
                         for c in cs:
@@ -529,7 +590,7 @@ def _call_llm(client: OpenAI, user_content: str, model: str, retries: int = 5, o
     raise RuntimeError(
         "Se agotaron los reintentos con el LLM. Último error: "
         f"{describe_error(last_err) if last_err else 'desconocido'}. "
-        "Cambia de proveedor/modelo (p. ej. gemini-2.5-flash-lite o llama-3.1-8b-instant), "
+        "Cambia de proveedor/modelo y comprueba que el ID esté activo para tu clave, "
         "baja el máximo de menciones o espera un rato."
     )
 
@@ -601,5 +662,3 @@ def report(brand: str, mentions: list[dict]) -> dict:
         ],
     }
     return summary
-
-

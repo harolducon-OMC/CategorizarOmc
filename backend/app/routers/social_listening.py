@@ -130,6 +130,7 @@ def analyze_social(request_payload: SocialAnalysisPayload, request: Request, db:
             xpoz_key=xpoz_key,
             langs=request_payload.languages or None,
             with_comments=request_payload.with_comments,
+            days=365,
         ))
         if mentions:
             mentions = social_core.classify(
@@ -148,6 +149,7 @@ def analyze_social(request_payload: SocialAnalysisPayload, request: Request, db:
                 "url": str(item.get("url", ""))[:1000],
                 "language": str(item.get("lang", ""))[:12],
                 "location": str(item.get("location", ""))[:120],
+                "created_at": str(item.get("created_at") or "")[:40],
                 "analysis": item.get("analysis", {}),
             }
             for item in mentions
@@ -159,4 +161,6 @@ def analyze_social(request_payload: SocialAnalysisPayload, request: Request, db:
     except Exception as exc:
         # No incluir textos, cuerpos del proveedor ni credenciales en logs o respuestas.
         logger.warning("Escucha social fallida (%s)", type(exc).__name__)
+        if type(exc).__name__ == "NotFoundError":
+            raise HTTPException(400, "El proveedor no reconoce ese ID de modelo. Elige un modelo disponible para tu clave o actualiza el ID personalizado.") from exc
         raise HTTPException(502, "No se pudo completar el análisis social. Verifica las claves y el proveedor, y vuelve a intentarlo.") from exc
